@@ -2,14 +2,14 @@ import pandas as pd
 import numpy as np
 import os
 from pathlib import Path
-from util_functions import split_word_to_list, intersect_of_2_lists
+from util_functions import *  # split_word_to_list, intersect_of_2_lists, dataframe_filter_only_above_nas
 
 
 def main():
     path = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
-    file_name = "alb-hpi-a 2019-20 NIRP design beca 20200629.csv"
+    input_file = "ClevisFatigue_Input.xlsx"
     results_file = "raft_moments_test.xlsx"
-    TowerLoads.read_attachment_loads(path, results_file)
+    df_loads = TowerLoads.read_attachment_loads(path, input_file, results_file)
 
 
 class TowerLoads:
@@ -18,29 +18,7 @@ class TowerLoads:
         self.file_name = file_name
         self.results_file_name = results_file
         'Dictionary to convert from naming in Excel sheet to format consistent with python code'
-        # self.convert_names = {
-        #     "Row #": "row",
-        #     "Str. No.": "structure_number",
-        #     "Structure Name": "structure_name",
-        #     "Load Case ": "lc",
-        #     "Joint Label": "joint",
-        #     "Long. Force (kN)": "f_long",
-        #     "Tran. Force (kN)": "f_tran",
-        #     "Vert. Force (kN)": "f_vert",
-        #     "Tran. Moment (kN-m)": "m_tran",
-        #     "Long. Moment (kN-m)": "m_long",
-        #     "Bending Moment (kN-m)": "m_res",
-        #     "Vert. Moment (kN-m)": "m_vert",
-        #     "Tran. Moment Total (kN-m)": "m_tot_tran",
-        #     "Long. Moment Total (kN-m)": "m_tot_long",
-        #     "Vert. Moment Total (kN-m)": "m_tot_vert",
-        #     "Total Raft Moment (kN-m)": "m_tot_res",
-        #     "Found. Usage %": "util",
-        #     "Distance between foundations [m]:": "foundation_dist",
-        #     "Foundation height [m]:": "foundation_height",
-        #     "Foundation": "foundation"
-        # }
-        self.convert_names = {
+        self.convert_names_pls = {
             'Row #': 'row',
             'Str. No.': 'structure_number',
             'Str. Name': 'structure_name',
@@ -61,26 +39,81 @@ class TowerLoads:
             'Loads from ahead span Long. (N)': 'longitudinal_ahead',
             'Warnings': 'warnings'
         }
-        columns_keep = list(self.convert_names.values())[:-7]
-        self.convert_names = {x: y for x, y in self.convert_names.items() if y in columns_keep}
-        self.convert_names_back = {y: x for x, y in self.convert_names.items()}
-        self.pls_foundation_ids = {
-            "a": 1,
-            "b": 2,
-            "c": 3,
-            "d": 4
+        self.convert_names_general = {
+            'Height [mm]:': 'height',
+            'Width [mm]:': 'width',
+            'Outer diameter [mm]:': 'd_outer',
+            'Inner diameter [mm]:': 'd_inner',
+            'Pin diameter [mm]:': 'd_pin',
+            'Stem diameter [mm]:': 'd_stem',
+            'Friction coefficient [-]:': 'friction',
+            'Force arm distance [mm]:': 'force_arm',
+            'Unit:': 'unit',
+            'Line name:': 'line_id',
+            'File name:': 'file_name'
         }
-        # self.excel_object = self._init_excel_object()
+        self.unit_conversion = {
+            'mm': 0.001,
+            'cm': 0.01,
+            'm': 1.,
+            'mm2': 1.e-6,
+            'cm2': 1.e-4,
+            'm2': 1.
+        }
+        columns_keep = list(self.convert_names_pls.values())[:-7]
+        self.convert_names_pls = {x: y for x, y in self.convert_names_pls.items() if y in columns_keep}
+        self.convert_names_pls_back = {y: x for x, y in self.convert_names_pls.items()}
+        'Setup for Excel and csv input'
+        self.excel_object = self._init_excel_object()
         self.csv_objects = self._init_csv_objects()
-        self.foundation_distance = 0.
-        self.foundation_height = 0.
-        self.pls_foundation_moment_arms = {}
+        'Input variables'
+        self.swivel_info = {}
+        self.clevis_info = {}
+        self.general_info = {}
+        self.line_file_name_info = {}
 
     @classmethod
-    def read_attachment_loads(cls, path, results_file):
-        cls_obj = cls(path, "dummy_input_file", results_file)
-        df = cls_obj._datafram_setup()
-        a=1
+    def read_attachment_loads(cls, path, input_file, results_file):
+        cls_obj = cls(path, input_file, results_file)
+        'Get input for necessary for friction calculations'
+        cls_obj.swivel_info = cls_obj._get_friction_info("GeneralInput", 1, ["Parameter", "Value"])
+        cls_obj.clevis_info = cls_obj._get_friction_info("GeneralInput", 9, ["Parameter", "Value"])
+        cls_obj.general_info = cls_obj._get_friction_info("GeneralInput", 14, ["Parameter", "Value"])
+        cls_obj.general_info = cls_obj._get_friction_info("GeneralInput", 14, ["Parameter", "Value"])
+        cls_obj.line_file_name_info = cls_obj._get_friction_info("FileInput", 0, ["Line name:", "File name:"])
+        cls_obj.line_file_name_info = {y: x for x, y in cls_obj.line_file_name_info.items()}
+        'Read loads from csv files'
+        df = cls_obj._dataframe_setup()
+        my = cls_obj.general_info["friction"]
+        r_out = cls_obj.swivel_info["d_outer"] * cls_obj.unit_conversion[cls_obj.general_info["unit"]]
+        r_in = cls_obj.swivel_info["d_inner"] * cls_obj.unit_conversion[cls_obj.general_info["unit"]]
+        df["t1"] = df.apply(lambda x: friction_torsion_resistance_t1(my, x["transversal"], r_out, r_in), axis=1)
+
+        return df
+
+    def _get_friction_info(self, sheet, header_row, header_columns):
+        '''
+        Function to read swivel, clevis or friction info, as specified in Excel sheet, and store in self
+
+        :param str sheet: Sheet name which data shall be extracted from
+        :param int header_row: Index to specify header row of Dataframe
+        :param list header_columns: Columns specifying header column of Dataframe
+
+        :return: Information for friction calculations
+        :rtype: dict
+        '''
+        df = self.excel_object.parse(
+            index_col=None,
+            skiprows=header_row,
+            sheet_name=sheet,
+            usecols=header_columns
+        )
+        df = dataframe_filter_only_above_nas(df, header_columns[1])
+        df.loc[:, header_columns[0]] = df.loc[:, header_columns[0]].map(
+            lambda x: self.convert_names_general[x] if x in self.convert_names_general else x
+        )
+        df = df.set_index([header_columns[0]])
+        return df.to_dict()[header_columns[1]]
 
     @classmethod
     def get_maximum_lc_moments(cls, path, file_name, results_file):
@@ -92,20 +125,17 @@ class TowerLoads:
         df = cls_obj._find_most_loaded_lcs_for_raft_foundations("VerificationLoads", 7)
         cls_obj._write_foundation_forces_to_excel(df)
 
-    def _datafram_setup(self):
+    def _dataframe_setup(self):
         line_list = []
-        counter = 1
         for file_name in self.csv_objects:
             df = pd.read_csv(os.path.join(self.path_input, file_name))
-            df.columns = df.columns.map(lambda x: self.convert_names[x] if x in self.convert_names else x)
-            df = df.loc[:, list(self.convert_names.values())]
+            df.columns = df.columns.map(lambda x: self.convert_names_pls[x] if x in self.convert_names_pls else x)
+            df = df.loc[:, list(self.convert_names_pls.values())]
             line_id = Path(file_name).stem.split()[0]
-            if line_id not in line_list:
-                df["line"] = line_id
-            else:
-                df["line"] = f"{line_id}_{counter}"
+            df["line_id"] = self.line_file_name_info[file_name]
+            'Add dataframe to existing'
             if "df_total" in locals():
-                df_total = pd.concat(df_total, df)
+                df_total = pd.concat([df_total, df])
             else:
                 df_total = df
 
@@ -144,7 +174,7 @@ class TowerLoads:
             for tow, res in df.groupby("structure_number"):
                 counter2 += 1
                 res = res.sort_values(by=["m_tot_res", "foundation"], ascending=False)
-                res.columns = res.columns.map(lambda x: self.convert_names_back[x] if x in self.convert_names_back else x)
+                res.columns = res.columns.map(lambda x: self.convert_names_pls_back[x] if x in self.convert_names_pls_back else x)
                 res.to_excel(
                     writer,
                     sheet_name=str(tow)
@@ -174,7 +204,7 @@ class TowerLoads:
             skiprows=header_row,
             sheet_name=sheet,
         )
-        inp_df.columns = inp_df.columns.map(lambda x: self.convert_names[x] if x in self.convert_names else x)
+        inp_df.columns = inp_df.columns.map(lambda x: self.convert_names_pls[x] if x in self.convert_names_pls else x)
 
         'Filter to store only relevant list values'
         na_indexes = list(np.flatnonzero(inp_df.iloc[:, header_column].isna()))  # Find NaN cells to define where lists end
@@ -205,7 +235,7 @@ class TowerLoads:
         inp_df = inp_df.iloc[0:na_indexes[0], :] if len(na_indexes) > 0 else inp_df
         'Change names to avoid special characters'
 
-        inp_df.columns = inp_df.columns.map(lambda x: self.convert_names[x] if x in self.convert_names else x)
+        inp_df.columns = inp_df.columns.map(lambda x: self.convert_names_pls[x] if x in self.convert_names_pls else x)
         inp_df = inp_df.applymap(lambda x: x.replace('"', '').replace("'", "").strip() if isinstance(x, str) else x)
 
         'Store data'
