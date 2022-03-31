@@ -51,6 +51,7 @@ class TowerLoads:
             'Friction coefficient [-]:': 'friction',
             'Force arm distance [mm]:': 'force_arm',
             'Unit:': 'unit',
+            'Load case at rest:': 'lc_rest',
             'Line name:': 'line_id',
             'File name:': 'file_name'
         }
@@ -81,10 +82,9 @@ class TowerLoads:
         cls_obj.swivel_info = cls_obj._get_friction_info("GeneralInput", 1, ["Parameter", "Value"])
         cls_obj.clevis_info = cls_obj._get_friction_info("GeneralInput", 9, ["Parameter", "Value"])
         cls_obj.general_info = cls_obj._get_friction_info("GeneralInput", 16, ["Parameter", "Value"])
-        # cls_obj.general_info = cls_obj._get_friction_info("GeneralInput", 17, ["Parameter", "Value"])
         cls_obj.line_file_name_info = cls_obj._get_friction_info("FileInput", 0, ["Line name:", "File name:"])
         cls_obj.line_file_name_info = {y: x for x, y in cls_obj.line_file_name_info.items()}
-        'Read loads from csv files'
+        'Read loads from csv files and calculate stem stresses'
         df = cls_obj._dataframe_setup()
 
         return df
@@ -137,6 +137,8 @@ class TowerLoads:
             df["line_id"] = self.line_file_name_info[file_name]
             df = self._add_swivel_torsion_moments(df)
             df = self._add_stem_stresses(df)
+            df = self._maximum_stress_range(df)
+            a = 1
             'Add dataframe to existing'
             if "df_total" in locals():
                 df_total = pd.concat([df_total, df])
@@ -144,6 +146,30 @@ class TowerLoads:
                 df_total = df
 
         return df_total
+
+    def _maximum_stress_range(self, df):
+        '''
+        Function to find clevis stem stresses based on force, moment and SCF
+
+        :param pd.DataFrame df: Dataframe containing all force information
+
+        :return: Dataframe with stem stresses
+        :rtype: pd.DataFrame
+        '''
+        lc_rest = self.general_info["lc_rest"]
+        for set_no, item in df.groupby(["set_no"]):
+            stress_nominal = item.loc[item.loc[:, "lc_description"] == lc_rest, :].set_index("structure_number")
+            item["stress_range"] = item.apply(
+                lambda x: abs(x["stress"] - stress_nominal.loc[x["structure_number"], "stress"]),
+                axis=1
+            )
+            item_max = item.loc[item["stress_range"] == item["stress_range"].max(), :]
+            if "df_return" not in locals():
+                df_return = item_max
+            else:
+                pass
+            # Include all towers!!!
+        return
 
     def _add_stem_stresses(self, df):
         '''
