@@ -78,3 +78,90 @@ def friction_moment_at_critical_section_swivel(f_x, force_arm, fraction_to_criti
     m_friction = friction_moment * fraction_to_critical_section
 
     return m_applied if m_applied < m_friction else m_friction
+
+
+def stress_stem_roark_17(f_axial, m_bending, d_outer, d_inner, r_notch):
+    '''
+    Function to convert force and bending actions to stress at a stem diameter transition
+
+    :param float f_axial: Axial force
+    :param float m_bending: Bending moment
+    :param float d_outer: Stem maximum diameter
+    :param float d_inner: Stem minimum diameter
+    :param float r_notch: Notch radius at diameter transition
+
+    :return: Stress including SCF's from axial and bending actions
+    :rtype: float
+    '''
+    stress_axial = scf_roark_17a(d_outer, d_inner, r_notch) * f_axial
+    stress_bending = scf_roark_17b(d_outer, d_inner, r_notch) * m_bending
+
+    return stress_axial + stress_bending
+
+
+def scf_roark_17a(d_outer, d_inner, r_notch):
+    '''
+    Roark's Formulas for stress and strain, table 17.1, formula 17a for axial stress
+
+    :param float d_outer: Stem maximum diameter
+    :param float d_inner: Stem minimum diameter
+    :param float r_notch: Notch radius at diameter transition
+
+    :return: Axial stress SCF
+    :rtype: float
+    '''
+    h = (d_outer - d_inner) / 2.
+    ratio = h / r_notch
+    h_d = 2. * h / d_outer
+    root_ratio = np.sqrt(ratio)
+
+    C1 = [0.927 + 1.149 * root_ratio - 0.086 * ratio, 1.125 + 0.831 * root_ratio - 0.01 * ratio]
+    C2 = [0.011 - 3.029 * root_ratio + 0.948 * ratio, -1.831 - 0.318 * root_ratio - 0.049 * ratio]
+    C3 = [-0.304 + 3.979 * root_ratio - 1.737 * ratio, 2.236 - 0.522 * root_ratio + 0.176 * ratio]
+    C4 = [0.366 - 2.098 * root_ratio + 0.875 * ratio, -0.63 + 0.009 * root_ratio - 0.117 * ratio]
+
+    col = 0
+    if 0.25 <= ratio <= 2.:
+        col = 0
+    elif 2. < ratio <= 20.:
+        col = 1
+    else:
+        raise "h / r outside bounds. SCF not valid"
+
+    scf = C1[col] + C2[col] * h_d + C3[col] * h_d ** 2 + C4[col] * h_d ** 3
+
+    return 4. * scf / (np.pi * (d_outer - 2. * h) ** 2)
+
+
+def scf_roark_17b(d_outer, d_inner, r_notch):
+    '''
+    Roark's Formulas for stress and strain, table 17.1, formula 17b for bending stress
+
+    :param float d_outer: Stem maximum diameter
+    :param float d_inner: Stem minimum diameter
+    :param float r_notch: Notch radius at diameter transition
+
+    :return: Axial stress SCF
+    :rtype: float
+    '''
+    h = (d_outer - d_inner) / 2.
+    ratio = h / r_notch
+    h_d = 2. * h / d_outer
+    root_ratio = np.sqrt(ratio)
+
+    C1 = [0.927 + 1.149 * root_ratio - 0.086 * ratio, 1.125 + 0.831 * root_ratio - 0.01 * ratio]
+    C2 = [0.015 - 3.281 * root_ratio + 0.837 * ratio, -3.79 + 0.958 * root_ratio - 0.257 * ratio]
+    C3 = [0.847 + 1.716 * root_ratio - 0.506 * ratio, 7.374 - 4.834 * root_ratio + 0.862 * ratio]
+    C4 = [-0.79 + 0.417 * root_ratio - 0.246 * ratio, -3.809 + 3.046 * root_ratio - 0.595 * ratio]
+
+    col = 0
+    if 0.25 <= ratio <= 2.:
+        col = 0
+    elif 2. < ratio <= 20.:
+        col = 1
+    else:
+        raise "h / r outside bounds. SCF not valid"
+
+    scf = C1[col] + C2[col] * h_d + C3[col] * h_d ** 2 + C4[col] * h_d ** 3
+
+    return 32. * scf / (np.pi * (d_outer - 2. * h) ** 3)

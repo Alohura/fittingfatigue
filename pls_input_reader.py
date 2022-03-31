@@ -46,6 +46,8 @@ class TowerLoads:
             'Inner diameter [mm]:': 'd_inner',
             'Pin diameter [mm]:': 'd_pin',
             'Stem diameter [mm]:': 'd_stem',
+            'Transition radius [mm]:': 'r_notch',
+            'Ball effective diameter [mm]:': 'd_ball',
             'Friction coefficient [-]:': 'friction',
             'Force arm distance [mm]:': 'force_arm',
             'Unit:': 'unit',
@@ -78,8 +80,8 @@ class TowerLoads:
         'Get input for necessary for friction calculations'
         cls_obj.swivel_info = cls_obj._get_friction_info("GeneralInput", 1, ["Parameter", "Value"])
         cls_obj.clevis_info = cls_obj._get_friction_info("GeneralInput", 9, ["Parameter", "Value"])
-        cls_obj.general_info = cls_obj._get_friction_info("GeneralInput", 14, ["Parameter", "Value"])
-        cls_obj.general_info = cls_obj._get_friction_info("GeneralInput", 14, ["Parameter", "Value"])
+        cls_obj.general_info = cls_obj._get_friction_info("GeneralInput", 16, ["Parameter", "Value"])
+        # cls_obj.general_info = cls_obj._get_friction_info("GeneralInput", 17, ["Parameter", "Value"])
         cls_obj.line_file_name_info = cls_obj._get_friction_info("FileInput", 0, ["Line name:", "File name:"])
         cls_obj.line_file_name_info = {y: x for x, y in cls_obj.line_file_name_info.items()}
         'Read loads from csv files'
@@ -127,9 +129,14 @@ class TowerLoads:
             df = pd.read_csv(os.path.join(self.path_input, file_name))
             df.columns = df.columns.map(lambda x: self.convert_names_pls[x] if x in self.convert_names_pls else x)
             df = df.loc[:, list(self.convert_names_pls.values())]
+            df["resultant"] = df.apply(
+                lambda x: np.sqrt(x["longitudinal"] ** 2 + x["transversal"] ** 2 + x["vertical"] ** 2),
+                axis=1
+            )
             line_id = Path(file_name).stem.split()[0]
             df["line_id"] = self.line_file_name_info[file_name]
             df = self._add_swivel_torsion_moments(df)
+            df = self._add_stem_stresses(df)
             'Add dataframe to existing'
             if "df_total" in locals():
                 df_total = pd.concat([df_total, df])
@@ -147,8 +154,15 @@ class TowerLoads:
         :return: Dataframe with stem stresses
         :rtype: pd.DataFrame
         '''
-        pass
+        d_out = self.clevis_info["d_ball"] * self.unit_conversion[self.general_info["unit"]]
+        d_in = self.clevis_info["d_stem"] * self.unit_conversion[self.general_info["unit"]]
+        r_notch = self.clevis_info["r_notch"] * self.unit_conversion[self.general_info["unit"]]
+        df["stress"] = df.apply(
+            lambda x: stress_stem_roark_17(x["resultant"], x["m_section"], d_out, d_in, r_notch) / 1.e6,
+            axis=1
+        )
 
+        return df
 
     def _add_swivel_torsion_moments(self, df):
         '''
