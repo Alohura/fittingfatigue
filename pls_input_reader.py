@@ -84,10 +84,6 @@ class TowerLoads:
         cls_obj.line_file_name_info = {y: x for x, y in cls_obj.line_file_name_info.items()}
         'Read loads from csv files'
         df = cls_obj._dataframe_setup()
-        my = cls_obj.general_info["friction"]
-        r_out = cls_obj.swivel_info["d_outer"] * cls_obj.unit_conversion[cls_obj.general_info["unit"]]
-        r_in = cls_obj.swivel_info["d_inner"] * cls_obj.unit_conversion[cls_obj.general_info["unit"]]
-        df["t1"] = df.apply(lambda x: friction_torsion_resistance_t1(my, x["transversal"], r_out, r_in), axis=1)
 
         return df
 
@@ -133,6 +129,7 @@ class TowerLoads:
             df = df.loc[:, list(self.convert_names_pls.values())]
             line_id = Path(file_name).stem.split()[0]
             df["line_id"] = self.line_file_name_info[file_name]
+            df = self._add_swivel_torsion_moments(df)
             'Add dataframe to existing'
             if "df_total" in locals():
                 df_total = pd.concat([df_total, df])
@@ -141,6 +138,60 @@ class TowerLoads:
 
         return df_total
 
+    def _add_stem_stresses(self, df):
+        '''
+        Function to find clevis stem stresses based on force, moment and SCF
+
+        :param pd.DataFrame df: Dataframe containing all force information
+
+        :return: Dataframe with stem stresses
+        :rtype: pd.DataFrame
+        '''
+        pass
+
+
+    def _add_swivel_torsion_moments(self, df):
+        '''
+        Function to find swivel torsion resistance moments based on applied force angle
+
+        :param pd.DataFrame df: Dataframe containing all force information
+
+        :return: Dataframe with torsion resistance moments
+        :rtype: pd.DataFrame
+        '''
+        'Input parameters to friction calculations'
+        my = self.general_info["friction"]
+        r_out = self.swivel_info["d_outer"] * self.unit_conversion[self.general_info["unit"]] / 2.
+        r_in = self.swivel_info["d_inner"] * self.unit_conversion[self.general_info["unit"]] / 2.
+        width = self.swivel_info["width"] * self.unit_conversion[self.general_info["unit"]]
+        height_swivel = self.swivel_info["height"] * self.unit_conversion[self.general_info["unit"]]
+        height_clevis = self.clevis_info["height"] * self.unit_conversion[self.general_info["unit"]]
+        r_pin = self.swivel_info["d_pin"] * self.unit_conversion[self.general_info["unit"]] / 2.
+        force_arm = self.general_info["force_arm"] * self.unit_conversion[self.general_info["unit"]]
+        fraction_to_section = (height_clevis + height_swivel) / force_arm
+        'Calculate friction moments from swivel / cleat interface (T1) and from swivel / pin reaction force couple (T2)'
+        df["t1"] = df.apply(
+            lambda x: friction_torsion_resistance_swivel_t1(my, x["transversal"], r_out, r_in),
+            axis=1
+        )
+        df["t2"] = df.apply(
+            lambda x: friction_torsion_resistance_swivel_t2(
+                my, x["transversal"], x["vertical"], width, height_swivel, r_pin
+            ),
+            axis=1
+        )
+        df["t_friction"] = df.loc[:, "t1"] + df.loc[:, "t2"]
+        df["m_section"] = df.apply(lambda x: friction_moment_at_critical_section_swivel(
+            x["longitudinal"],
+            force_arm,
+            fraction_to_section,
+            x["t_friction"]
+        ),
+                                   axis=1
+                                   )
+
+        return df
+
     def _init_excel_object(self):
         '''
         Open Excel object for read
@@ -148,8 +199,8 @@ class TowerLoads:
         :return All Excel sheets stored in object for data extraction
         :rtype pandas.ExcelFile ExcelObj
         '''
-        ExcelObj = pd.ExcelFile(os.path.join(self.path_input, self.file_name))
-        return ExcelObj
+        excel_obj = pd.ExcelFile(os.path.join(self.path_input, self.file_name))
+        return excel_obj
 
     def _init_csv_objects(self):
         """
