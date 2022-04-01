@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+from scipy import optimize
+
 def split_word_to_list(input_string):
     return [str_char for str_char in input_string]
 
@@ -168,3 +170,51 @@ def scf_roark_17b(d_outer, d_inner, r_notch):
     scf = C1[col] + C2[col] * h_d + C3[col] * h_d ** 2 + C4[col] * h_d ** 3
 
     return 32. * scf / (np.pi * (d_outer - 2. * h) ** 3)
+
+
+def en_1991_1_4_b_9(x):
+    return 0.7 * np.log10(x) ** 2 - 17.4 * np.log10(x) + 100
+
+
+def en_1991_1_4_b_9_solve(x, y):
+    return en_1991_1_4_b_9(x) - y
+
+
+def stress_histogram_en_1991_1_4(n_histograms, n_delta):
+    '''
+
+    :param n_histograms:
+    :param n_delta:
+    :return:
+    '''
+    'Define boundaries for stress histogram'
+    n_max = optimize.root_scalar(
+                en_1991_1_4_b_9_solve,
+                x0=1e6,
+                bracket=[1., 1e10],
+                args=(0.)
+            ).root
+    n_start = optimize.root_scalar(
+        en_1991_1_4_b_9_solve,
+        x0=1e6,
+        bracket=[1., 1e10],
+        args=(100.)
+    ).root
+
+    'Find factor by which to increase each n_delta such that final value in n_list equals n_max'
+    alpha = (n_max / n_delta - n_histograms) / (n_histograms * (n_histograms + 1.)) * 2.
+    'Find upper and lower bound for each histogram column'
+    n_list = [1.]
+    for i in range(0, n_histograms):
+        n_list.append(n_list[i] + n_delta * (1 + i * alpha))
+    'Find histograms'
+    n_list = np.array(n_list)
+    delta_list = n_list[1:] - n_list[:-1]
+
+    'Find stress values at middle of histograms'
+    n_middle = [(x + y) / 2 for (x, y) in zip(n_list[:-1], n_list[1:])]
+    stresses = [en_1991_1_4_b_9(x) for x in n_middle]
+
+    return delta_list, stresses
+
+
