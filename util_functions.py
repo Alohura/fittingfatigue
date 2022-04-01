@@ -93,8 +93,11 @@ def stress_stem_roark_17(f_axial, m_bending, d_outer, d_inner, r_notch):
     :return: Stress including SCF's from axial and bending actions
     :rtype: float
     '''
-    stress_axial = scf_roark_17a(d_outer, d_inner, r_notch) * f_axial
-    stress_bending = scf_roark_17b(d_outer, d_inner, r_notch) * m_bending
+    stress_axial, stress_bending = 0., 0.
+    if abs(f_axial) > 0.:
+        stress_axial = scf_roark_17a(d_outer, d_inner, r_notch) * abs(f_axial)
+    if abs(m_bending) > 0.:
+        stress_bending = scf_roark_17b(d_outer, d_inner, r_notch) * abs(m_bending)
 
     return stress_axial + stress_bending
 

@@ -124,7 +124,6 @@ class TowerLoads:
         cls_obj._write_foundation_forces_to_excel(df)
 
     def _dataframe_setup(self):
-        line_list = []
         for file_name in self.csv_objects:
             df = pd.read_csv(os.path.join(self.path_input, file_name))
             df.columns = df.columns.map(lambda x: self.convert_names_pls[x] if x in self.convert_names_pls else x)
@@ -133,19 +132,12 @@ class TowerLoads:
                 lambda x: np.sqrt(x["longitudinal"] ** 2 + x["transversal"] ** 2 + x["vertical"] ** 2),
                 axis=1
             )
-            line_id = Path(file_name).stem.split()[0]
             df["line_id"] = self.line_file_name_info[file_name]
             df = self._add_swivel_torsion_moments(df)
             df = self._add_stem_stresses(df)
             df = self._maximum_stress_range(df)
-            a = 1
-            'Add dataframe to existing'
-            if "df_total" in locals():
-                df_total = pd.concat([df_total, df])
-            else:
-                df_total = df
 
-        return df_total
+        return df
 
     def _maximum_stress_range(self, df):
         '''
@@ -158,18 +150,31 @@ class TowerLoads:
         '''
         lc_rest = self.general_info["lc_rest"]
         for set_no, item in df.groupby(["set_no"]):
+            'Convert to stress ranges by subtracting the EDS (no wind) weather case'
             stress_nominal = item.loc[item.loc[:, "lc_description"] == lc_rest, :].set_index("structure_number")
-            item["stress_range"] = item.apply(
-                lambda x: abs(x["stress"] - stress_nominal.loc[x["structure_number"], "stress"]),
+            item["stress_range_axial"] = item.apply(
+                lambda x: abs(x["stress_axial"] - stress_nominal.loc[x["structure_number"], "stress_axial"]),
                 axis=1
             )
-            item_max = item.loc[item["stress_range"] == item["stress_range"].max(), :]
+            'Assume worst case where bending completely reverses, i.e. multiply MW - EDS by 2'
+            item["stress_range_bending"] = item.apply(
+                lambda x: 2. * abs(x["stress_bending"] - stress_nominal.loc[x["structure_number"], "stress_bending"]),
+                axis=1
+            )
+            item["stress_range"] = item.loc[:, "stress_range_axial"] + 2. * item.loc[:, "stress_range_bending"]
+            'Find maximum stress ranges per tower'
+            tow_list = list(item.loc[:, "structure_number"].unique())
+            indx_list = []
+            for tow in tow_list:
+                indx_list.append(item.loc[item.loc[:, "structure_number"] == tow, "stress_range"].idxmax())
+
+            item_max = item.loc[indx_list, :]
             if "df_return" not in locals():
                 df_return = item_max
             else:
-                pass
-            # Include all towers!!!
-        return
+                df_return = pd.concat([df_return, item_max])
+
+        return df_return
 
     def _add_stem_stresses(self, df):
         '''
@@ -183,10 +188,15 @@ class TowerLoads:
         d_out = self.clevis_info["d_ball"] * self.unit_conversion[self.general_info["unit"]]
         d_in = self.clevis_info["d_stem"] * self.unit_conversion[self.general_info["unit"]]
         r_notch = self.clevis_info["r_notch"] * self.unit_conversion[self.general_info["unit"]]
-        df["stress"] = df.apply(
-            lambda x: stress_stem_roark_17(x["resultant"], x["m_section"], d_out, d_in, r_notch) / 1.e6,
+        df["stress_axial"] = df.apply(
+            lambda x: stress_stem_roark_17(x["resultant"], 0., d_out, d_in, r_notch) / 1.e6,
             axis=1
         )
+        df["stress_bending"] = df.apply(
+            lambda x: stress_stem_roark_17(0., x["m_section"], d_out, d_in, r_notch) / 1.e6,
+            axis=1
+        )
+        df["stress"] = df.loc[:, "stress_axial"] + df.loc[:, "stress_bending"]
 
         return df
 
