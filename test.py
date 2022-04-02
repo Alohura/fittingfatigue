@@ -34,6 +34,6 @@ m_bending = 300.
 stress = stress_stem_roark_17(f_axial, m_bending, d_od, d_id, r_notch)
 a = 1
 
-n_deltas, n_stresses = stress_histogram_en_1991_1_4(10000, 1)
-
+n_deltas, n_stresses = stress_histogram_en_1991_1_4(100, 2, 3)
+b = sum(n_deltas) / 1e9
 a = 1

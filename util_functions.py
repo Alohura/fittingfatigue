@@ -180,11 +180,12 @@ def en_1991_1_4_b_9_solve(x, y):
     return en_1991_1_4_b_9(x) - y
 
 
-def stress_histogram_en_1991_1_4(n_histograms, n_delta):
+def stress_histogram_en_1991_1_4(n_histograms, n_delta, coefficient=1):
     '''
 
-    :param n_histograms:
-    :param n_delta:
+    :param int n_histograms:
+    :param int n_delta:
+    :param int coefficient:
     :return:
     '''
     'Define boundaries for stress histogram'
@@ -202,11 +203,12 @@ def stress_histogram_en_1991_1_4(n_histograms, n_delta):
     ).root
 
     'Find factor by which to increase each n_delta such that final value in n_list equals n_max'
-    alpha = (n_max / n_delta - n_histograms) / (n_histograms * (n_histograms + 1.)) * 2.
+    # alpha = (n_max / n_delta - n_histograms) / (n_histograms * (n_histograms + 1.)) * 2.
+    alpha = (n_max / n_delta - n_histograms) / sum([i ** coefficient for i in range(n_histograms + 1)])
     'Find upper and lower bound for each histogram column'
     n_list = [1.]
     for i in range(0, n_histograms):
-        n_list.append(n_list[i] + n_delta * (1 + i * alpha))
+        n_list.append(n_list[i] + n_delta * (1 + i ** coefficient * alpha))
     'Find histograms'
     n_list = np.array(n_list)
     delta_list = n_list[1:] - n_list[:-1]
@@ -218,3 +220,62 @@ def stress_histogram_en_1991_1_4(n_histograms, n_delta):
     return delta_list, stresses
 
 
+def dataframe_select_suspension_insulator_sets(df, tow_string, set_string, set_factor, column_texts):
+    '''
+    Function to search dataframe only for unique tower entries in column "tow_string" where all columns containing
+    text in "column_texts" contain non-zero values.
+
+    :param pd.DataFrame df: Dataframe to be sorted.
+    :param str tow_string: Column to find unique values for
+    :param str set_string: Column to find unique values for
+    :param float set_factor: Factor that average loading of Phase wires / EW is assumed
+    :param list column_texts: Text to search for in matching columns
+
+    :return: Dataframe storing only unique row entries in "column_string" where all columns with entries from
+    "column_texts" are non-zero
+    :rtype: pd.DataFrame
+    '''
+    'Store original column ids'
+    columns_ids = df.columns
+    columns = [[x for x in list(df.columns) if y in x] for y in column_texts]
+    col_names = []
+
+    'Add resultant to ahead / back loading'
+    for i, column_matches in enumerate(columns):
+        col_names.append(f"susp{i + 1}")
+        df[col_names[i]] = df.apply(lambda x: np.sqrt(sum([x[col] ** 2 for col in column_matches])), axis=1)
+
+    'Check to store only row entries that are loaded both from ahead and back spans'
+    df["match"] = df.apply(lambda x: 1 if all([1 if x[y] != 0 else 0 for y in col_names]) else 0, axis=1)
+
+    'Perform second check, to identify attachment points with substantially lower loads, which are assumed as EW'
+    tow_sets = {}
+    for tow_id, item in df.groupby([tow_string]):
+        set_sums = {}
+        'Find average resultant load per attachment point'
+        for set_id, item_set in item.groupby([set_string]):
+            set_sums[set_id] = item_set.apply(lambda x: sum([x[y] for y in col_names]), axis=1).mean()
+        'Find sets to remove, if their average is lower by more than "set_factor"'
+        remove_sets = list(
+            {
+                x: y for x, y in set_sums.items() if (np.average(list(set_sums.values())) / y) > set_factor
+            }.keys()
+        )
+        keep_sets = [x for x in item.loc[:, set_string].unique() if x not in remove_sets]
+        tow_sets[tow_id] = keep_sets
+
+    df["keep"] = df.apply(
+        lambda x: 1 if (x[tow_string] in tow_sets.keys()) and (x[set_string] in tow_sets[x[tow_string]]) else 0,
+        axis=1
+    )
+    'Keep only towers and sets that match both checks, i.e. if both ahead / back loading and loads larger'
+    'than a fraction of the average attachment point loading'
+    df = df.loc[(df.loc[:, "match"] == 1) & (df.loc[:, "keep"] == 1), :]
+    df = df.loc[:, columns_ids]
+
+    return df
+
+
+def dataframe_add_swing_angle(df):
+    df["swing_angle"] = df.apply(lambda x: np.degrees(np.arctan2(x["transversal"], x["vertical"])), axis=1)
+    return df
