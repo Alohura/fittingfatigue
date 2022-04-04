@@ -38,7 +38,7 @@ def friction_torsion_resistance_swivel_t1(friction, force, r_out, r_in):
     :rtype: float
     '''
 
-    return 2. * friction * force * (r_out ** 3 - r_in ** 3) / (r_out ** 2 - r_in ** 2) / 3.
+    return 2. * friction * abs(force) * (r_out ** 3 - r_in ** 3) / (r_out ** 2 - r_in ** 2) / 3.
 
 
 def friction_torsion_resistance_swivel_t2(friction, f_y, f_z, b_swivel, h_swivel, r_pin):
@@ -57,7 +57,7 @@ def friction_torsion_resistance_swivel_t2(friction, f_y, f_z, b_swivel, h_swivel
     :rtype: float
     '''
 
-    r_y = (f_z / 2. - f_y * h_swivel / b_swivel)
+    r_y = (f_z / 2. - abs(f_y) * h_swivel / b_swivel)
 
     return 2. * friction * abs(r_y) * r_pin if r_y < 0. else 0.
 
@@ -276,6 +276,67 @@ def dataframe_select_suspension_insulator_sets(df, tow_string, set_string, set_f
     return df
 
 
-def dataframe_add_swing_angle(df):
-    df["swing_angle"] = df.apply(lambda x: np.degrees(np.arctan2(x["transversal"], x["vertical"])), axis=1)
+def dataframe_add_swing_angle(df, col_label, components=["vertical", "transversal"]):
+    df[f"swing_angle_{col_label}"] = df.apply(
+        lambda x: np.degrees(np.arctan2(x[components[1]], x[components[0]])), axis=1
+    )
+    return df
+
+
+def excel_sheet_find_input_rows(excel_object, sheet, column):
+    '''
+    Read PLS_Input sheet to find row indexes which starts with "#" in the relevant tables in sheet
+
+    :param pd.ExcelFile excel_object: Input ExcelFile object
+    :param str sheet: Name of sheet to read
+    :param str column: Column to search for NaN's in
+    
+    :return: Lists storing indexes and headers of input 
+    :rtype: tuple
+    '''
+    inp_df = excel_object.parse(
+        # index_col=column,
+        skiprows=0,
+        sheet_name=sheet,
+    )
+
+    a = 1
+    header_rows = inp_df.iloc[:, column].fillna("").str.startswith("#").dropna()
+    header_row_indexes = list(np.flatnonzero(header_rows))
+    header_row_labels = list(inp_df.iloc[:, column][header_row_indexes])
+
+    return header_row_indexes, header_row_labels
+
+
+def fatigue_damage_from_histogram(stress_max, histogram, sn_curve):
+    stresses = [stress_max * x / 100. for x in histogram[1]]
+    # n_capacity = [fatigue_cycle_constant_stress_range_nzs3404(stress, sn_curve) for stress in stresses]
+    # n_cycl = histogram[0]
+    return sum([n / fatigue_cycle_constant_stress_range_nzs3404(stress, sn_curve) for n, stress in zip(histogram[0], stresses)])
+
+
+def fatigue_cycle_constant_stress_range_nzs3404(stress, sn_curve):
+    if stress > sn_curve["s2"]:
+        return sn_curve["s1"] ** sn_curve["m1"] * sn_curve["n_s1"] / stress ** sn_curve["m1"]
+    elif stress > sn_curve["s3"]:
+        return sn_curve["s2"] ** sn_curve["m2"] * sn_curve["n_cut_off"] / stress ** sn_curve["m2"]
+    else:
+        return 1.e99
+
+
+def dataframe_subtract_one_loadcase(df, nominal, parameter, tower_column):
+    '''
+
+    :param pd.DataFrame df:
+    :param pd.DataFrame nominal:
+    :param str parameter:
+    :param str tower_column:
+
+    :return:
+    :rtype: pd.DataFrame
+    '''
+    df[f"{parameter}_range"] = df.apply(
+        lambda x: abs(x[parameter] - nominal.loc[x[tower_column], parameter]),
+        axis=1
+    )
     return df

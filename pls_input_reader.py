@@ -9,10 +9,10 @@ def main():
     path = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
     input_file = "ClevisFatigue_Input.xlsx"
     results_file = "raft_moments_test.xlsx"
-    df_loads = TowerLoads.read_attachment_loads(path, input_file, results_file)
+    TowerColdEndFittingFatigue.fatigue_damage(path, input_file, results_file)
 
 
-class TowerLoads:
+class TowerColdEndFittingFatigue:
     def __init__(self, path, file_name, results_file):
         self.path_input = path
         self.file_name = file_name
@@ -75,28 +75,101 @@ class TowerLoads:
         self.clevis_info = {}
         self.general_info = {}
         self.line_file_name_info = {}
+        self.sn_info = {}
+        self.sn_input_columns = ['Curve', 'm1', 'm2', 's1', 's2', 's3', 'n_s1', 'n_cut_off', 'CA']
 
     @classmethod
-    def read_attachment_loads(cls, path, input_file, results_file):
+    def fatigue_damage(cls, path, input_file, results_file):
         cls_obj = cls(path, input_file, results_file)
+        df = cls_obj._read_attachment_loads()
+        df = cls_obj._ca_value_map_to_sn_detail(df)
+        df = cls_obj._calculate_fatigue_damage(df)
+        a=1
+
+    def _calculate_fatigue_damage(self, df):
+        '''
+
+        :param pd.DataFrame df:
+
+        :return:
+        :rtype: pd.DataFrame
+        '''
+        histogram = stress_histogram_en_1991_1_4(300, 2, 3)
+
+        df["damage"] = df.apply(
+            lambda x: fatigue_damage_from_histogram(x["stress_range"], histogram, self.sn_info[x["sn_curve"]]),
+            axis=1
+        )
+
+        return df.sort_values(by="damage", ascending=False)
+
+    def _ca_value_map_to_sn_detail(self, df):
+        '''
+
+        :param df:
+
+        :return:
+        :rtype: pd.DataFrame
+        '''
+        df["sn_curve"] = "160"
+        return df
+
+    def _read_attachment_loads(self):
+        '''
+
+        :return:
+        :rtype: pd.DataFrame
+        '''
+        # cls_obj = cls(path, input_file, results_file)
+        'Find position of data entries'
+        header_indexes, header_labels = excel_sheet_find_input_rows(self.excel_object, "GeneralInput", 0)
         'Get input for necessary for friction calculations'
-        cls_obj.swivel_info = cls_obj._get_friction_info("GeneralInput", 1, ["Parameter", "Value"])
-        cls_obj.clevis_info = cls_obj._get_friction_info("GeneralInput", 9, ["Parameter", "Value"])
-        cls_obj.general_info = cls_obj._get_friction_info("GeneralInput", 16, ["Parameter", "Value"])
-        cls_obj.line_file_name_info = cls_obj._get_friction_info("FileInput", 0, ["Line name:", "File name:"])
-        cls_obj.line_file_name_info = {y: x for x, y in cls_obj.line_file_name_info.items()}
-        'Read loads from csv files and calculate stem stresses'
-        df = cls_obj._dataframe_setup()
+        self.swivel_info = self._get_input_info("GeneralInput", header_indexes[0] + 2, ["Parameter", "Value"])
+        self.clevis_info = self._get_input_info("GeneralInput", header_indexes[1] + 2, ["Parameter", "Value"])
+        self.general_info = self._get_input_info("GeneralInput", header_indexes[2] + 2, ["Parameter", "Value"])
+        self.sn_info = self._get_input_info(
+            "GeneralInput",
+            header_indexes[3] + 2,
+            self.sn_input_columns,
+            True
+        )
+        self.sn_info = {f"{x}": y for x, y in self.sn_info.items()}
+        self.line_file_name_info = self._get_input_info("FileInput", 0, ["Line name:", "File name:"])
+        self.line_file_name_info = {y: x for x, y in self.line_file_name_info.items()}
+
+        'Read loads from csv files. calculate stem stresses and store maximum stress ranges'
+        df = self._dataframe_setup()
+
+        'Add swing angles'
+        df = self._add_swing_angles(df)
 
         return df
 
-    def _get_friction_info(self, sheet, header_row, header_columns):
+    def _add_swing_angles(self, df):
+        '''
+
+        :param pd.DataFrame df:
+
+        :return:
+        :rtype: pd.DataFrame
+        '''
+        df = dataframe_add_swing_angle(df, "trans", ["vertical", "transversal"])
+        df = dataframe_add_swing_angle(df, "trans_orig", ["f_vert_nom", "f_trans_nom"])
+        df["swing_angle_trans_range"] = df.loc[:, "swing_angle_trans"] - df.loc[:, "swing_angle_trans_orig"]
+        df = dataframe_add_swing_angle(df, "long", ["vertical", "longitudinal"])
+        df = dataframe_add_swing_angle(df, "long_orig", ["f_vert_nom", "f_long_nom"])
+        df["swing_angle_long_range"] = df.loc[:, "swing_angle_long"] - df.loc[:, "swing_angle_long_orig"]
+
+        return df
+
+    def _get_input_info(self, sheet, header_row, header_columns, transpose=False):
         '''
         Function to read swivel, clevis or friction info, as specified in Excel sheet, and store in self
 
         :param str sheet: Sheet name which data shall be extracted from
         :param int header_row: Index to specify header row of Dataframe
         :param list header_columns: Columns specifying header column of Dataframe
+        :param bool transpose: Transpose dictionary in case of S-N data
 
         :return: Information for friction calculations
         :rtype: dict
@@ -112,19 +185,15 @@ class TowerLoads:
             lambda x: self.convert_names_general[x] if x in self.convert_names_general else x
         )
         df = df.set_index([header_columns[0]])
-        return df.to_dict()[header_columns[1]]
-
-    @classmethod
-    def get_maximum_lc_moments(cls, path, file_name, results_file):
-        cls_obj = cls(path, file_name, results_file)
-        # cls_obj._get_foundation_distance("JointSupportReactions", 1, 5)
-        cls_obj._get_foundation_distance("VerificationLoads", 1, 5)
-        cls_obj._get_foundation_moment_arms()
-        # df = cls_obj._find_most_loaded_lcs_for_raft_foundations("JointSupportReactions", 7)
-        df = cls_obj._find_most_loaded_lcs_for_raft_foundations("VerificationLoads", 7)
-        cls_obj._write_foundation_forces_to_excel(df)
+        df.columns = df.columns.map(lambda x: x.lower())
+        return df.transpose().to_dict() if transpose else df.to_dict()[header_columns[1].lower()]
 
     def _dataframe_setup(self):
+        '''
+
+        :return:
+        :rtype: pd.DataFrame
+        '''
         for file_name in self.csv_objects:
             df = pd.read_csv(os.path.join(self.path_input, file_name))
             'Convert names to code names, ref. dictionaries for converting names in __init__'
@@ -141,42 +210,45 @@ class TowerLoads:
             )
             df["line_id"] = self.line_file_name_info[file_name]
             df = self._add_swivel_torsion_moments(df)
-            df = dataframe_add_swing_angle(df)
             df = self._add_stem_stresses(df)
-            df = self._maximum_stress_range(df)
+            df = self._maximum_force_and_stress_range(df)
 
         return df
 
-    def _maximum_stress_range(self, df):
+    def _maximum_force_and_stress_range(self, df, tow_column="structure_number"):
         '''
         Function to find clevis stem stresses based on force, moment and SCF
 
         :param pd.DataFrame df: Dataframe containing all force information
+        :param str tow_column: Identifier for column containing tower numbers
 
         :return: Dataframe with stem stresses
         :rtype: pd.DataFrame
         '''
         lc_rest = self.general_info["lc_rest"]
         for set_no, item in df.groupby(["set_no"]):
+            'Store dataframe entries for nominal case'
+            df_nominal = item.loc[item.loc[:, "lc_description"] == lc_rest, :].set_index(tow_column)
+
             'Convert to stress ranges by subtracting the EDS (no wind) weather case'
-            stress_nominal = item.loc[item.loc[:, "lc_description"] == lc_rest, :].set_index("structure_number")
-            item["stress_range_axial"] = item.apply(
-                lambda x: abs(x["stress_axial"] - stress_nominal.loc[x["structure_number"], "stress_axial"]),
-                axis=1
-            )
+            item = dataframe_subtract_one_loadcase(item, df_nominal, "stress_axial", tow_column)
+            item = dataframe_subtract_one_loadcase(item, df_nominal, "stress_bending", tow_column)
+
             'Assume worst case where bending completely reverses, i.e. multiply MW - EDS by 2'
-            item["stress_range_bending"] = item.apply(
-                lambda x: 2. * abs(x["stress_bending"] - stress_nominal.loc[x["structure_number"], "stress_bending"]),
-                axis=1
-            )
-            item["stress_range"] = item.loc[:, "stress_range_axial"] + 2. * item.loc[:, "stress_range_bending"]
+            item["stress_range"] = item.loc[:, "stress_axial_range"] + 2. * item.loc[:, "stress_bending_range"]
             'Find maximum stress ranges per tower'
-            tow_list = list(item.loc[:, "structure_number"].unique())
+            tow_list = list(item.loc[:, tow_column].unique())
             indx_list = []
             for tow in tow_list:
-                indx_list.append(item.loc[item.loc[:, "structure_number"] == tow, "stress_range"].idxmax())
+                indx_list.append(item.loc[item.loc[:, tow_column] == tow, "stress_range"].idxmax())
 
             item_max = item.loc[indx_list, :]
+
+            'Add nominal values'
+            item_max["f_long_nom"] = item_max.apply(lambda x: df_nominal.loc[x[tow_column], "longitudinal"], axis=1)
+            item_max["f_trans_nom"] = item_max.apply(lambda x: df_nominal.loc[x[tow_column], "transversal"], axis=1)
+            item_max["f_vert_nom"] = item_max.apply(lambda x: df_nominal.loc[x[tow_column], "vertical"], axis=1)
+
             if "df_return" not in locals():
                 df_return = item_max
             else:
