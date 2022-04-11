@@ -97,9 +97,9 @@ def stress_stem_roark_17(f_axial, m_bending, d_outer, d_inner, r_notch):
     '''
     stress_axial, stress_bending = 0., 0.
     if abs(f_axial) > 0.:
-        stress_axial = scf_roark_17a(d_outer, d_inner, r_notch) * abs(f_axial)
+        stress_axial = stress_roark_17a(d_outer, d_inner, r_notch) * abs(f_axial)
     if abs(m_bending) > 0.:
-        stress_bending = scf_roark_17b(d_outer, d_inner, r_notch) * abs(m_bending)
+        stress_bending = stress_roark_17b(d_outer, d_inner, r_notch) * abs(m_bending)
 
     return stress_axial + stress_bending
 
@@ -133,9 +133,24 @@ def scf_roark_17a(d_outer, d_inner, r_notch):
     else:
         raise "h / r outside bounds. SCF not valid"
 
-    scf = C1[col] + C2[col] * h_d + C3[col] * h_d ** 2 + C4[col] * h_d ** 3
+    return C1[col] + C2[col] * h_d + C3[col] * h_d ** 2 + C4[col] * h_d ** 3
 
-    return 4. * scf / (np.pi * (d_outer - 2. * h) ** 2)
+
+def stress_roark_17a(d_outer, d_inner, r_notch):
+    '''
+    Roark's Formulas for stress and strain, table 17.1, formula 17a for axial stress.
+
+    :param float d_outer: Stem maximum diameter
+    :param float d_inner: Stem minimum diameter
+    :param float r_notch: Notch radius at diameter transition
+
+    :return: Axial stress SCF / Area
+    :rtype: float
+    '''
+
+    h = (d_outer - d_inner) / 2.
+
+    return 4. * scf_roark_17a(d_outer, d_inner, r_notch) / (np.pi * (d_outer - 2. * h) ** 2)
 
 
 def scf_roark_17b(d_outer, d_inner, r_notch):
@@ -146,7 +161,7 @@ def scf_roark_17b(d_outer, d_inner, r_notch):
     :param float d_inner: Stem minimum diameter
     :param float r_notch: Notch radius at diameter transition
 
-    :return: Axial stress SCF
+    :return: Bending stress SCF
     :rtype: float
     '''
     h = (d_outer - d_inner) / 2.
@@ -167,9 +182,24 @@ def scf_roark_17b(d_outer, d_inner, r_notch):
     else:
         raise "h / r outside bounds. SCF not valid"
 
-    scf = C1[col] + C2[col] * h_d + C3[col] * h_d ** 2 + C4[col] * h_d ** 3
+    return C1[col] + C2[col] * h_d + C3[col] * h_d ** 2 + C4[col] * h_d ** 3
 
-    return 32. * scf / (np.pi * (d_outer - 2. * h) ** 3)
+
+def stress_roark_17b(d_outer, d_inner, r_notch):
+    '''
+    Roark's Formulas for stress and strain, table 17.1, formula 17b for bending stress
+
+    :param float d_outer: Stem maximum diameter
+    :param float d_inner: Stem minimum diameter
+    :param float r_notch: Notch radius at diameter transition
+
+    :return: Bending stress SCF / section modulus
+    :rtype: float
+    '''
+
+    h = (d_outer - d_inner) / 2.
+
+    return 32. * scf_roark_17b(d_outer, d_inner, r_notch) / (np.pi * (d_outer - 2. * h) ** 3)
 
 
 def en_1991_1_4_b_9(x):
@@ -218,6 +248,24 @@ def stress_histogram_en_1991_1_4(n_histograms, n_delta, coefficient=1):
     stresses = [en_1991_1_4_b_9(x) for x in n_middle]
 
     return delta_list, stresses
+
+
+def dataframe_remove_columns(df, column_texts):
+    '''
+    Function to remove columns containing certain texts
+
+    :param pd.DataFrame df: Dataframe to be sorted.
+    :param list column_texts: Text to search for in matching columns
+
+    :return: Dataframe without columns containing text from "column_texts"
+    :rtype: pd.DataFrame
+    '''
+    columns_ids = df.columns
+    columns = [x for x in list(df.columns) for y in column_texts if y in x]
+    columns_ids = [x for x in columns_ids if x not in columns]
+    df = df.loc[:, columns_ids]
+
+    return df
 
 
 def dataframe_select_suspension_insulator_sets(df, tow_string, set_string, set_factor, column_texts):
@@ -316,19 +364,27 @@ def fatigue_damage_from_histogram(stress_max, histogram, sn_curve):
 
 
 def fatigue_cycle_constant_stress_range_nzs3404(stress, sn_curve):
+    '''
+
+    :param float stress:
+    :param dict sn_curve:
+
+    :return:
+    :rtype: float
+    '''
     if stress > sn_curve["s2"]:
         return sn_curve["s1"] ** sn_curve["m1"] * sn_curve["n_s1"] / stress ** sn_curve["m1"]
     elif stress > sn_curve["s3"]:
-        return sn_curve["s2"] ** sn_curve["m2"] * sn_curve["n_cut_off"] / stress ** sn_curve["m2"]
+        return sn_curve["s3"] ** sn_curve["m2"] * sn_curve["n_cut_off"] / stress ** sn_curve["m2"]
     else:
         return 1.e99
 
 
-def dataframe_subtract_one_loadcase(df, nominal, parameter, tower_column):
+def dataframe_subtract_one_load_case(df, nominal, parameter, tower_column):
     '''
 
-    :param pd.DataFrame df:
-    :param pd.DataFrame nominal:
+    :param pd.DataFrame df: Dataframe to be edited
+    :param pd.DataFrame nominal: Dataframe containing nominal load case
     :param str parameter:
     :param str tower_column:
 
@@ -340,3 +396,34 @@ def dataframe_subtract_one_loadcase(df, nominal, parameter, tower_column):
         axis=1
     )
     return df
+
+
+def dataframe_add_nominal_values(df, df_nom, set_column="set_no", tow_column="structure_number"):
+    '''
+    Function to add loads for nominal load case for each entry.
+
+    :param pd.DataFrame df: Dataframe to be processed
+    :param pd.DataFrame df_nom: Dataframe containing values for nominal load case
+    :param str set_column: Identifier for column containing set numbers / IDs
+    :param str tow_column: Identifier for column containing tower numbers / IDs
+
+    :return: Dataframe with all information necessary for processing fatigue damage
+    :rtype: pd.DataFrame
+    '''
+    for set_no, item in df.groupby([set_column]):
+        'Find dataframe entries for nominal case'
+        item_nominal = df_nom.loc[
+                       df_nom.loc[:, set_column] == set_no, :
+                       ].set_index(tow_column)
+
+        'Add nominal values'
+        item["f_long_nom"] = item.apply(lambda x: item_nominal.loc[x[tow_column], "longitudinal"], axis=1)
+        item["f_trans_nom"] = item.apply(lambda x: item_nominal.loc[x[tow_column], "transversal"], axis=1)
+        item["f_vert_nom"] = item.apply(lambda x: item_nominal.loc[x[tow_column], "vertical"], axis=1)
+
+        if "df_return" not in locals():
+            df_return = item
+        else:
+            df_return = pd.concat([df_return, item])
+
+    return df_return

@@ -26,12 +26,15 @@ print(dummy_variable)
 # f.close()
 
 d_id = 24. / 1000.
-d_od = 50. / 1000.
+d_od = 48. / 1000.
 r_notch = 1. / 1000.
 f_axial = 100000.
 m_bending = 300.
 
 stress = stress_stem_roark_17(f_axial, m_bending, d_od, d_id, r_notch)
+scf_a = scf_roark_17a(d_od, d_id, r_notch)
+scf_b = scf_roark_17b(d_od, d_id, r_notch)
+print("SCFs [Axial, bending]:", [scf_a, scf_b])
 a = 1
 
 n_deltas, n_stresses = stress_histogram_en_1991_1_4(100, 2, 3)

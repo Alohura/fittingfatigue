@@ -2,13 +2,14 @@ import pandas as pd
 import numpy as np
 import os
 from pathlib import Path
+from time import time
 from util_functions import *  # split_word_to_list, intersect_of_2_lists, dataframe_filter_only_above_nas
 
 
 def main():
     path = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
     input_file = "ClevisFatigue_Input.xlsx"
-    results_file = "raft_moments_test.xlsx"
+    results_file = "line_summary.xlsx"
     TowerColdEndFittingFatigue.fatigue_damage(path, input_file, results_file)
 
 
@@ -53,8 +54,34 @@ class TowerColdEndFittingFatigue:
             'Unit:': 'unit',
             'Load case at rest:': 'lc_rest',
             'Line name:': 'line_id',
-            'File name:': 'file_name'
+            'File name:': 'file_name',
+            'Insulator sets:': 'insulator'
         }
+        self.convert_names_code = {
+            "Fatigue damage": "damage",
+            "SN Curve (NZS 3404)": "sn_curve",
+            "Transversal swing angle [deg]": "swing_angle_trans",
+            "Transversal swing angle - at rest [deg]": "swing_angle_trans_orig",
+            " Change in transversal swing angle [deg]": "swing_angle_trans_range",
+            "Longitudinal swing angle [deg]": "swing_angle_long",
+            "Longitudinal swing angle - at rest [deg]": "swing_angle_long_orig",
+            " Change in longitudinal swing angle [deg]": "swing_angle_long_range",
+            "Resultant force [N]": "resultant",
+            "Nominal Longitudinal load [N]": "f_long_nom",
+            "Nominal Transversal load [N]": "f_trans_nom",
+            "Nominal Vertical load [N]": "f_vert_nom",
+            "Stress [MPa]": "stress",
+            "Stress - axial [MPa]": "stress_axial",
+            "Stress - bending [MPa]": "stress_bending",
+            "Stress range [MPa]": "stress_range",
+            "Stress range - axial [MPa]": "stress_axial_range",
+            "Stress range - bending [MPa]": "stress_bending_range",
+            "Friction resistance moment - T1 [Nm]": "t1",
+            "Friction resistance moment - T2 [Nm]": "t2",
+            "Total friction resistance moment [Nm]": "t_friction",
+            "Moment at critical stem section [Nm]": "m_section"
+        }
+        self.convert_names_all = {**self.convert_names_pls, **self.convert_names_general, **self.convert_names_code}
         self.unit_conversion = {
             'mm': 0.001,
             'cm': 0.01,
@@ -67,6 +94,7 @@ class TowerColdEndFittingFatigue:
         columns_keep = list(self.convert_names_pls.values())[:-1]
         self.convert_names_pls = {x: y for x, y in self.convert_names_pls.items() if y in columns_keep}
         self.convert_names_pls_back = {y: x for x, y in self.convert_names_pls.items()}
+        self.convert_names_all_back = {y: x for x, y in self.convert_names_all.items()}
         'Setup for Excel and csv input'
         self.excel_object = self._init_excel_object()
         self.csv_objects = self._init_csv_objects()
@@ -84,6 +112,7 @@ class TowerColdEndFittingFatigue:
         df = cls_obj._read_attachment_loads()
         df = cls_obj._ca_value_map_to_sn_detail(df)
         df = cls_obj._calculate_fatigue_damage(df)
+        cls_obj._write_to_excel(df, "line_id", ["damage"])
         a=1
 
     def _calculate_fatigue_damage(self, df):
@@ -111,18 +140,19 @@ class TowerColdEndFittingFatigue:
         :return:
         :rtype: pd.DataFrame
         '''
-        df["sn_curve"] = "160"
+        df["sn_curve"] = "140"
         return df
 
     def _read_attachment_loads(self):
         '''
 
+
         :return:
         :rtype: pd.DataFrame
         '''
-        # cls_obj = cls(path, input_file, results_file)
         'Find position of data entries'
         header_indexes, header_labels = excel_sheet_find_input_rows(self.excel_object, "GeneralInput", 0)
+
         'Get input for necessary for friction calculations'
         self.swivel_info = self._get_input_info("GeneralInput", header_indexes[0] + 2, ["Parameter", "Value"])
         self.clevis_info = self._get_input_info("GeneralInput", header_indexes[1] + 2, ["Parameter", "Value"])
@@ -134,7 +164,7 @@ class TowerColdEndFittingFatigue:
             True
         )
         self.sn_info = {f"{x}": y for x, y in self.sn_info.items()}
-        self.line_file_name_info = self._get_input_info("FileInput", 0, ["Line name:", "File name:"])
+        self.line_file_name_info = self._get_input_info("FileInput", 0, ["Line name:", "File name:", "Insulator sets:"])
         self.line_file_name_info = {y: x for x, y in self.line_file_name_info.items()}
 
         'Read loads from csv files. calculate stem stresses and store maximum stress ranges'
@@ -181,61 +211,82 @@ class TowerColdEndFittingFatigue:
             usecols=header_columns
         )
         df = dataframe_filter_only_above_nas(df, header_columns[1])
+
+        'Convert to coding names, i.e. without spaces and special signs. See __init__ for conversion dictionary'
         df.loc[:, header_columns[0]] = df.loc[:, header_columns[0]].map(
             lambda x: self.convert_names_general[x] if x in self.convert_names_general else x
         )
         df = df.set_index([header_columns[0]])
         df.columns = df.columns.map(lambda x: x.lower())
+
         return df.transpose().to_dict() if transpose else df.to_dict()[header_columns[1].lower()]
 
     def _dataframe_setup(self):
         '''
+        Read PLS-CADD structure attachment loading reports and process loads. The function stores swivel torsion
+        moments, clevis stem stresses and swing angles.
 
-        :return:
+        :return: Dataframe containing all necessary input for fatigue evaluations and control checks
         :rtype: pd.DataFrame
         '''
         for file_name in self.csv_objects:
             df = pd.read_csv(os.path.join(self.path_input, file_name))
-            'Convert names to code names, ref. dictionaries for converting names in __init__'
+
+            'Convert names to code names, ref. dictionaries for converting names in __init__ module'
             df.columns = df.columns.map(lambda x: self.convert_names_pls[x] if x in self.convert_names_pls else x)
             df = df.loc[:, list(self.convert_names_pls.values())]
-            'Sort only suspension towers'
+
+            'Store only suspension towers and remove columns no longer needed'
             df = dataframe_select_suspension_insulator_sets(
                 df, "structure_number", "set_no", 3., ["ahead", "back"]
             )
+            df = dataframe_remove_columns(df, ["ahead", "back"])
 
+            'Add line ID to uniquely identify each line'
+            df["line_id"] = self.line_file_name_info[file_name]
+
+            'Process data and calculate moments'
             df["resultant"] = df.apply(
                 lambda x: np.sqrt(x["longitudinal"] ** 2 + x["transversal"] ** 2 + x["vertical"] ** 2),
                 axis=1
             )
-            df["line_id"] = self.line_file_name_info[file_name]
             df = self._add_swivel_torsion_moments(df)
+
+            'Convert to stress and stress ranges'
             df = self._add_stem_stresses(df)
-            df = self._maximum_force_and_stress_range(df)
+            df, df_nom = self._maximum_force_and_stress_range(df)
+
+            'Store nominal values'
+            df = dataframe_add_nominal_values(df, df_nom)
 
         return df
 
-    def _maximum_force_and_stress_range(self, df, tow_column="structure_number"):
+    def _maximum_force_and_stress_range(self, df, set_column="set_no", tow_column="structure_number"):
         '''
-        Function to find clevis stem stresses based on force, moment and SCF
+        Function to find clevis stem stresses based on force, moment and SCF.
 
         :param pd.DataFrame df: Dataframe containing all force information
-        :param str tow_column: Identifier for column containing tower numbers
+        :param str set_column: Identifier for column containing set numbers / IDs
+        :param str tow_column: Identifier for column containing tower numbers / IDs
 
         :return: Dataframe with stem stresses
-        :rtype: pd.DataFrame
+        :rtype: (pd.DataFrame, pd.DataFrame)
         '''
-        lc_rest = self.general_info["lc_rest"]
-        for set_no, item in df.groupby(["set_no"]):
-            'Store dataframe entries for nominal case'
-            df_nominal = item.loc[item.loc[:, "lc_description"] == lc_rest, :].set_index(tow_column)
+        'Store dataframe entries for nominal case'
+        df_nominal = df.loc[df.loc[:, "lc_description"] == self.general_info["lc_rest"], :]
+        for set_no, item in df.groupby([set_column]):
+            'Find dataframe entries for nominal case'
+            item_nominal = item.loc[
+                           item.loc[:, "lc_description"] == self.general_info["lc_rest"], :
+                           ].set_index(tow_column)
 
             'Convert to stress ranges by subtracting the EDS (no wind) weather case'
-            item = dataframe_subtract_one_loadcase(item, df_nominal, "stress_axial", tow_column)
-            item = dataframe_subtract_one_loadcase(item, df_nominal, "stress_bending", tow_column)
+            item = dataframe_subtract_one_load_case(item, item_nominal, "stress_axial", tow_column)
+            item = dataframe_subtract_one_load_case(item, item_nominal, "stress_bending", tow_column)
 
             'Assume worst case where bending completely reverses, i.e. multiply MW - EDS by 2'
             item["stress_range"] = item.loc[:, "stress_axial_range"] + 2. * item.loc[:, "stress_bending_range"]
+
             'Find maximum stress ranges per tower'
             tow_list = list(item.loc[:, tow_column].unique())
             indx_list = []
@@ -244,17 +295,12 @@ class TowerColdEndFittingFatigue:
 
             item_max = item.loc[indx_list, :]
 
-            'Add nominal values'
-            item_max["f_long_nom"] = item_max.apply(lambda x: df_nominal.loc[x[tow_column], "longitudinal"], axis=1)
-            item_max["f_trans_nom"] = item_max.apply(lambda x: df_nominal.loc[x[tow_column], "transversal"], axis=1)
-            item_max["f_vert_nom"] = item_max.apply(lambda x: df_nominal.loc[x[tow_column], "vertical"], axis=1)
-
             if "df_return" not in locals():
                 df_return = item_max
             else:
                 df_return = pd.concat([df_return, item_max])
 
-        return df_return
+        return df_return, df_nominal
 
     def _add_stem_stresses(self, df):
         '''
@@ -262,7 +308,7 @@ class TowerColdEndFittingFatigue:
 
         :param pd.DataFrame df: Dataframe containing all force information
 
-        :return: Dataframe with stem stresses
+        :return: Dataframe with stem stresses in MPa
         :rtype: pd.DataFrame
         '''
         d_out = self.clevis_info["d_ball"] * self.unit_conversion[self.general_info["unit"]]
@@ -344,18 +390,28 @@ class TowerColdEndFittingFatigue:
         for file_name in file_names:
             if Path(file_name).suffix.strip(".") == "csv":
                 return_names.append(file_name)
+
         return return_names
 
-    def _write_foundation_forces_to_excel(self, df):
-        '''Write to file for all towers'''
+    def _write_to_excel(self, df, group_col, sort_cols=[]):
+        '''
+        Write results to Excel.
+
+        :param pd.DataFrame df:
+        :param str group_col:
+        :param list sort_cols:
+
+        '''
         file_name = os.path.join(self.path_input, self.results_file_name)
-        counter, counter2 = 0, 0
+        counter2 = 0
         with pd.ExcelWriter(file_name) as writer:
-            counter =+1
-            for tow, res in df.groupby("structure_number"):
+            for tow, res in df.groupby(group_col):
                 counter2 += 1
-                res = res.sort_values(by=["m_tot_res", "foundation"], ascending=False)
-                res.columns = res.columns.map(lambda x: self.convert_names_pls_back[x] if x in self.convert_names_pls_back else x)
+                if len(sort_cols) > 0:
+                    res = res.sort_values(by=sort_cols, ascending=False)
+                res.columns = res.columns.map(
+                    lambda x: self.convert_names_all_back[x] if x in self.convert_names_all_back else x
+                )
                 res.to_excel(
                     writer,
                     sheet_name=str(tow)
