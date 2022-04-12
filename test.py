@@ -51,3 +51,34 @@ a = 1
 # }
 # sn_curve = {f"{x}": y for x, y in sn_curve.items()}
 
+list1 = [1, 2, 24]
+list2 = [1, 2, 23]
+
+return_list = [[x, list2[list1.index(x)]] for x in list1 if x not in list2]
+print(return_list)
+
+columns = [
+       'row', 'structure_number', 'lc', 'wc',
+       'lc_description', 'set_no', 'phase_no', 'joint', 'vertical',
+       'transversal', 'longitudinal', 'line_id', 'resultant', 't1', 't2',
+       't_friction', 'm_section', 'SCF_axial', 'SCF_bending', 'stress_axial',
+       'stress_bending', 'stress', 'stress_axial_range',
+       'stress_bending_range', 'stress_range', 'f_long_nom', 'f_trans_nom',
+       'f_vert_nom', 'swing_angle_trans', 'swing_angle_trans_orig',
+       'swing_angle_trans_range', 'swing_angle_long', 'swing_angle_long_orig',
+       'swing_angle_long_range', 'sn_curve', 'damage'
+]
+
+
+columns = list_items_move(
+       columns,
+       [
+              ["line_id", "structure_number", False],
+              ["set_no", "lc", False],
+              ["resultant", "phase_no", True],
+              ["joint", "resultant", False],
+       ]
+)
+print(columns)
+
+

@@ -120,7 +120,7 @@ def scf_roark_17a(d_outer, d_inner, r_notch):
     h_d = 2. * h / d_outer
     root_ratio = np.sqrt(ratio)
 
-    C1 = [0.927 + 1.149 * root_ratio - 0.086 * ratio, 1.125 + 0.831 * root_ratio - 0.01 * ratio]
+    C1 = [0.927 + 1.149 * root_ratio - 0.086 * ratio, 1.225 + 0.831 * root_ratio - 0.01 * ratio]
     C2 = [0.011 - 3.029 * root_ratio + 0.948 * ratio, -1.831 - 0.318 * root_ratio - 0.049 * ratio]
     C3 = [-0.304 + 3.979 * root_ratio - 1.737 * ratio, 2.236 - 0.522 * root_ratio + 0.176 * ratio]
     C4 = [0.366 - 2.098 * root_ratio + 0.875 * ratio, -0.63 + 0.009 * root_ratio - 0.117 * ratio]
@@ -169,7 +169,7 @@ def scf_roark_17b(d_outer, d_inner, r_notch):
     h_d = 2. * h / d_outer
     root_ratio = np.sqrt(ratio)
 
-    C1 = [0.927 + 1.149 * root_ratio - 0.086 * ratio, 1.125 + 0.831 * root_ratio - 0.01 * ratio]
+    C1 = [0.927 + 1.149 * root_ratio - 0.086 * ratio, 1.225 + 0.831 * root_ratio - 0.01 * ratio]
     C2 = [0.015 - 3.281 * root_ratio + 0.837 * ratio, -3.79 + 0.958 * root_ratio - 0.257 * ratio]
     C3 = [0.847 + 1.716 * root_ratio - 0.506 * ratio, 7.374 - 4.834 * root_ratio + 0.862 * ratio]
     C4 = [-0.79 + 0.417 * root_ratio - 0.246 * ratio, -3.809 + 3.046 * root_ratio - 0.595 * ratio]
@@ -365,11 +365,12 @@ def fatigue_damage_from_histogram(stress_max, histogram, sn_curve):
 
 def fatigue_cycle_constant_stress_range_nzs3404(stress, sn_curve):
     '''
+    Function to find allowable number of cycles at one stress state, in accordance with NZS 3404, 10.6.
 
-    :param float stress:
-    :param dict sn_curve:
+    :param float stress: Stress at one stress state
+    :param dict sn_curve: Containing all SN parameters
 
-    :return:
+    :return: Allowable cycles at stress level
     :rtype: float
     '''
     if stress > sn_curve["s2"]:
@@ -427,3 +428,55 @@ def dataframe_add_nominal_values(df, df_nom, set_column="set_no", tow_column="st
             df_return = pd.concat([df_return, item])
 
     return df_return
+
+
+def lists_compare_contents(list1, list2):
+    '''
+    Function to compare lists and return list of strings describing each entry where the list differ
+
+    :param list list1:
+    :param list list2:
+
+    :return: List of strings
+    :rtype: list
+    '''
+
+    return_list = [f"File: '{x}' not in input list, please update.\n" for x in list1 if x not in list2]
+
+    return return_list
+
+
+def file_objects_defined_in_input_file(file_objects, input_list):
+    '''
+    Function to check if list of file objects to be processed are specified in input list. Exit if not, with
+    printout of missing objects in input list.
+
+    :param list file_objects: List of file objects to be processed
+    :param list input_list: Input list connecting file objects with IDs specified in input sheet
+
+    '''
+    file_list = lists_compare_contents(file_objects, input_list)
+    if len(file_list) > 0:
+        print("".join(file_list))
+        exit()
+
+
+def list_items_move(input_list, sorting_items):
+    '''
+    Function to reorganize input list based on sorting items in separate list
+    [item_to_move (str), item_to_replace (str), remove (bool)].
+
+    :param list input_list: List to be reorganized
+    :param list sorting_items: List with entries to search for and move, with 3rd item deciding if replaced value shall be
+    stored or not
+
+    :return: Reorganized list
+    :rtype: list
+    '''
+    for item_from, item_to, item_remove in sorting_items:
+        index_from, index_new = input_list.index(item_from), input_list.index(item_to)
+        item_to = [] if item_remove else [input_list[index_new]]
+        input_list = input_list[:index_new] + [input_list[index_from]] + item_to \
+                     + input_list[index_new + 1:index_from] + input_list[index_from + 1:]
+
+    return input_list

@@ -5,11 +5,13 @@ from pathlib import Path
 from time import time
 from util_functions import *  # split_word_to_list, intersect_of_2_lists, dataframe_filter_only_above_nas
 
+time0 = float
 
 def main():
     path = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
     input_file = "ClevisFatigue_Input.xlsx"
     results_file = "line_summary.xlsx"
+    time0 = time()
     TowerColdEndFittingFatigue.fatigue_damage(path, input_file, results_file)
 
 
@@ -67,19 +69,21 @@ class TowerColdEndFittingFatigue:
             "Longitudinal swing angle - at rest [deg]": "swing_angle_long_orig",
             " Change in longitudinal swing angle [deg]": "swing_angle_long_range",
             "Resultant force [N]": "resultant",
-            "Nominal Longitudinal load [N]": "f_long_nom",
-            "Nominal Transversal load [N]": "f_trans_nom",
-            "Nominal Vertical load [N]": "f_vert_nom",
+            "Nominal EDS Longitudinal load [N]": "f_long_nom",
+            "Nominal EDS Transversal load [N]": "f_trans_nom",
+            "Nominal EDS Vertical load [N]": "f_vert_nom",
             "Stress [MPa]": "stress",
             "Stress - axial [MPa]": "stress_axial",
             "Stress - bending [MPa]": "stress_bending",
-            "Stress range [MPa]": "stress_range",
+            "Stress range [MPa] (Axial + 2 x Bending stress ranges)": "stress_range",
             "Stress range - axial [MPa]": "stress_axial_range",
             "Stress range - bending [MPa]": "stress_bending_range",
             "Friction resistance moment - T1 [Nm]": "t1",
             "Friction resistance moment - T2 [Nm]": "t2",
             "Total friction resistance moment [Nm]": "t_friction",
-            "Moment at critical stem section [Nm]": "m_section"
+            "Moment at critical stem section [Nm]": "m_section",
+            "SCF axial": "SCF_axial",
+            "SCF bending": "SCF_bending"
         }
         self.convert_names_all = {**self.convert_names_pls, **self.convert_names_general, **self.convert_names_code}
         self.unit_conversion = {
@@ -113,7 +117,6 @@ class TowerColdEndFittingFatigue:
         df = cls_obj._ca_value_map_to_sn_detail(df)
         df = cls_obj._calculate_fatigue_damage(df)
         cls_obj._write_to_excel(df, "line_id", ["damage"])
-        a=1
 
     def _calculate_fatigue_damage(self, df):
         '''
@@ -164,8 +167,11 @@ class TowerColdEndFittingFatigue:
             True
         )
         self.sn_info = {f"{x}": y for x, y in self.sn_info.items()}
+
+        'Get input on file names and check if files are present'
         self.line_file_name_info = self._get_input_info("FileInput", 0, ["Line name:", "File name:", "Insulator sets:"])
         self.line_file_name_info = {y: x for x, y in self.line_file_name_info.items()}
+        file_objects_defined_in_input_file(self.csv_objects, list(self.line_file_name_info.keys()))
 
         'Read loads from csv files. calculate stem stresses and store maximum stress ranges'
         df = self._dataframe_setup()
@@ -177,10 +183,11 @@ class TowerColdEndFittingFatigue:
 
     def _add_swing_angles(self, df):
         '''
+        Function to calculate swing angles (longitudinal, transversal) based on attachment point loads
 
-        :param pd.DataFrame df:
+        :param pd.DataFrame df: Input dataframe
 
-        :return:
+        :return: Dataframe with swing angle information added
         :rtype: pd.DataFrame
         '''
         df = dataframe_add_swing_angle(df, "trans", ["vertical", "transversal"])
@@ -314,6 +321,8 @@ class TowerColdEndFittingFatigue:
         d_out = self.clevis_info["d_ball"] * self.unit_conversion[self.general_info["unit"]]
         d_in = self.clevis_info["d_stem"] * self.unit_conversion[self.general_info["unit"]]
         r_notch = self.clevis_info["r_notch"] * self.unit_conversion[self.general_info["unit"]]
+        df["SCF_axial"] = scf_roark_17a(d_out, d_in, r_notch)
+        df["SCF_bending"] = scf_roark_17b(d_out, d_in, r_notch)
         df["stress_axial"] = df.apply(
             lambda x: stress_stem_roark_17(x["resultant"], 0., d_out, d_in, r_notch) / 1.e6,
             axis=1
@@ -397,16 +406,25 @@ class TowerColdEndFittingFatigue:
         '''
         Write results to Excel.
 
-        :param pd.DataFrame df:
-        :param str group_col:
-        :param list sort_cols:
+        :param pd.DataFrame df: Dataframe containing all information to be written to file
+        :param str group_col: Dataframe columns to group into separate sheets
+        :param list sort_cols: Columns to sort on, in prioritized order.
 
         '''
         file_name = os.path.join(self.path_input, self.results_file_name)
-        counter2 = 0
+        'Reorganize order of columns'
+        columns = list_items_move(
+            list(df.columns),
+            [
+                ["line_id", "structure_number", False],
+                ["set_no", "lc", False],
+                ["resultant", "phase_no", True],
+                ["joint", "resultant", False],
+            ]
+        )
+        df = df.loc[:, columns]
         with pd.ExcelWriter(file_name) as writer:
             for tow, res in df.groupby(group_col):
-                counter2 += 1
                 if len(sort_cols) > 0:
                     res = res.sort_values(by=sort_cols, ascending=False)
                 res.columns = res.columns.map(
