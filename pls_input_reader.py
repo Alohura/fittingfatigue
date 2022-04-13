@@ -517,45 +517,121 @@ class ReadCAandSetInformation:
             list(cls_obj.file_name_info.keys())
         )
         'Read CA values'
-        cls_obj._excel_read_ca("bpe-hay-a", "Susp Cold End Condition")
+        df = cls_obj._excel_read_ca_file_all(
+            "Detailed Lines CA Data",
+            "Insulators & Hardware",
+            "Susp Cold End Condition"
+        )
+        # df = cls_obj._excel_read_ca_file(
+        #     "Detailed Lines CA Data",
+        #     "Insulators & Hardware",
+        #     "cpk-wil-b",# "man-twi-a", #  "alb-hpi-a", #"bpe-hay-a", #
+        #     "Susp Cold End Condition"
+        # )
 
         a=1
 
-    def _excel_read_ca(self, line_name, position):
+    def _excel_read_ca_file_all(self, sheet, table_string, position):
         '''
 
+        :param str sheet: Name of Excel sheet where data is read
+        :param table_string: Table in sheet to get data from
+        :param str position: Measurement position to be chosen
+
+        :return:
+        :rtype: pd.DataFrame
+        '''
+        df_list = [0 for x in self.file_name_info.keys()]
+        print(f"Time to start of Excel CA read: {time() - time0}")
+        for i, (line_id, item) in enumerate(self.file_name_info.items()):
+            df_list[i] = self._excel_read_ca_file(sheet, table_string, line_id, position)
+            print(f"Time after Excel CA read of {line_id}: {time() - time0}")
+
+        a=1
+        return pd.concat(df_list)
+
+    def _excel_read_ca_file(self, sheet, table_string, line_name, position):
+        '''
+
+        :param str sheet: Name of Excel sheet where data is read
+        :param table_string: Table in sheet to get data from
         :param str line_name: Line name ID
         :param str position: Measurement position to be chosen
 
         :return:
-        :rtype: pd.DataFrme
+        :rtype: pd.DataFrame
         '''
+        'Set up excel object'
+        excel_object = self._init_excel_object(self.file_name_info[line_name]["ca_file"])
         'Find position of data entries'
-        sheet = "Detailed Lines CA Data"
-        table_string = "Insulators & Hardware"
-
-        file_name = self.file_name_info[line_name]["ca_file"]
-
-        excel_object = self._init_excel_object(file_name)
         header_indexes, header_labels = excel_sheet_find_input_rows_by_string(
             excel_object, sheet, 0, -1, "Asset"
         )
         row = header_indexes[header_labels.index(table_string)]
+
+        'Create dataframe from Excel object and convert to code name format'
         df = dataframe_from_excel_object(excel_object, sheet, row + 2, 0)
         df.columns = df.columns.map(
             lambda x: self.convert_names_ca[x] if x in self.convert_names_ca else x
         )
+        'Store only relevant columns and rows'
         df = df.loc[
              :,
              ["asset_description", "asset_location", "device_position", "year", "position_name", "measurement", "date"]
              ]
         df = df.loc[df.loc[:, "position_name"] == position, :]
+
+        'Check if dataframe is empty'
+        if df.shape[0] == 0:
+            return pd.DataFrame(
+                columns=[
+                    "line_id", "structure_number", "ca_max", "circuit1", "circuit2", "ca_1", "ca_2", "year", "date",
+                    "asset_description"
+                ]
+            )
+
+        'Sort on line, structure and circuit information'
         df["line_id"] = line_name
         df["structure_number"] = df.apply(lambda x: x["device_position"].lower().replace(x["line_id"], ""), axis=1)
         df["circuit"] = df.loc[:, "asset_location"].map(lambda x: x.split("-")[-1])
         df = df.loc[:, ["line_id", "structure_number", "circuit", "measurement", "year", "date", "asset_description"]]
+        df["line_structure"] = df.loc[:, "line_id"] + "_" + df.loc[:, "structure_number"] #+ "_" + df.loc[:, "circuit"]
         df = df.sort_values(by=["structure_number", "circuit"])
-        a=1
+
+        'If more than one circuit, store maximum ca_value for both circuits'
+        circuits = df.loc[:, "circuit"].unique()
+        if len(circuits) > 1:
+            df1 = df.groupby("circuit").get_group(circuits[0]).set_index("line_structure")
+            df2 = df.groupby("circuit").get_group(circuits[1]).set_index("line_structure")
+            shapes = [df1.shape[0], df2.shape[0]]
+            dfs = [df1, df2]
+            df1, df2 = dfs[shapes.index(max(shapes))], dfs[shapes.index(min(shapes))]
+            df1["ca_1"] = df1.loc[:, "measurement"]
+            df1["ca_2"] = df2.loc[:, "measurement"]
+            df1["ca_max"] = df1.apply(lambda x: max(x["ca_1"], x["ca_2"]), axis=1)
+            df1["circuit2"] = df2.loc[:, "circuit"]
+            df1["circuit1"] = df1.loc[:, "circuit"]
+            df = df1
+
+        else:
+            df["ca_1"] = df.loc[:, "measurement"]
+            df["ca_2"] = df.loc[:, "measurement"]
+            df["ca_max"] = df.loc[:, "measurement"]
+            df["circuit2"] = df.loc[:, "circuit"]
+            df["circuit1"] = df.loc[:, "circuit"]
+            df = df.set_index("line_structure")
+            # tmp = lists_compare_contents(list(df1.loc[:, "structure_number"].unique()), list(df2.loc[:, "structure_number"].unique()))
+
+        'Reorder columns'
+        df = df.loc[
+             :,
+             [
+                 "line_id", "structure_number", "ca_max", "circuit1", "circuit2", "ca_1", "ca_2", "year", "date",
+                 "asset_description"
+             ]
+             ]
+
+        return df
 
     def _init_excel_object(self, file_name):
         '''
@@ -582,6 +658,8 @@ class ReadCAandSetInformation:
 
         'Store only files containing CA and insulator information'
         for file_name in file_names:
+            if os.path.isdir(os.path.join(self.input.path_ca, file_name)):
+                continue
             f = Path(file_name).stem
             file_type = f[f.index(" ")+1:]
             line_name = f[:f.index(" ")].lower()
