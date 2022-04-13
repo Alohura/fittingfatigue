@@ -5,19 +5,22 @@ from pathlib import Path
 from time import time
 from util_functions import *  # split_word_to_list, intersect_of_2_lists, dataframe_filter_only_above_nas
 
-time0 = float
+time0 = time()
+time1 = time()
 
 def main():
-    path = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
+    path_pls_input = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
+    path_ca_input = r"C:\Users\AndreasLem\Groundline\NZ-6500 Insulator Cold End Failure Investigation - Documents\03 Operations\01_Inputs\01_Line Asset"
     input_file = "ClevisFatigue_Input.xlsx"
     results_file = "line_summary.xlsx"
     time0 = time()
-    TowerColdEndFittingFatigue.fatigue_damage(path, input_file, results_file)
+    TowerColdEndFittingFatigue.fatigue_damage(path_pls_input, path_ca_input, input_file, results_file)
 
 
 class TowerColdEndFittingFatigue:
-    def __init__(self, path, file_name, results_file):
+    def __init__(self, path, path_ca, file_name, results_file):
         self.path_input = path
+        self.path_ca = path_ca
         self.file_name = file_name
         self.results_file_name = results_file
         'Dictionary to convert from naming in Excel sheet to format consistent with python code'
@@ -43,6 +46,8 @@ class TowerColdEndFittingFatigue:
             'Warnings': 'warnings'
         }
         self.convert_names_general = {
+            'Parameter': 'parameter',
+            'Value': 'value',
             'Height [mm]:': 'height',
             'Width [mm]:': 'width',
             'Outer diameter [mm]:': 'd_outer',
@@ -99,9 +104,6 @@ class TowerColdEndFittingFatigue:
         self.convert_names_pls = {x: y for x, y in self.convert_names_pls.items() if y in columns_keep}
         self.convert_names_pls_back = {y: x for x, y in self.convert_names_pls.items()}
         self.convert_names_all_back = {y: x for x, y in self.convert_names_all.items()}
-        'Setup for Excel and csv input'
-        self.excel_object = self._init_excel_object()
-        self.csv_objects = self._init_csv_objects()
         'Input variables'
         self.swivel_info = {}
         self.clevis_info = {}
@@ -109,10 +111,25 @@ class TowerColdEndFittingFatigue:
         self.line_file_name_info = {}
         self.sn_info = {}
         self.sn_input_columns = ['Curve', 'm1', 'm2', 's1', 's2', 's3', 'n_s1', 'n_cut_off', 'CA']
+        'Setup for Excel and csv input'
+        self.excel_object = self._init_excel_object()
+        self.csv_objects = self._init_csv_files()
 
     @classmethod
-    def fatigue_damage(cls, path, input_file, results_file):
-        cls_obj = cls(path, input_file, results_file)
+    def fatigue_damage(cls, path, path_ca, input_file, results_file):
+        '''
+        Calculate fatigue damage of insulators from PLS-CADD structure attachment loading, input values from
+        "input_file", condition assessment (CA) values from files in folder "path_ca" and store to "results_file"
+
+        :param str path: Path with PLS-CADD input and structure loading ".csv" files
+        :param str path_ca: Path to folder with OBIEE reports containing CA values and insulator set information
+        :param str input_file: Excel input file manually filled out prior to analysis
+        :param str results_file: Name of Excel file results are written to
+
+        '''
+        cls_obj = cls(path, path_ca, input_file, results_file)
+        cls_obj._excel_input_read()
+        ReadCAandSetInformation.setup(cls_obj)
         df = cls_obj._read_attachment_loads()
         df = cls_obj._ca_value_map_to_sn_detail(df)
         df = cls_obj._calculate_fatigue_damage(df)
@@ -146,33 +163,41 @@ class TowerColdEndFittingFatigue:
         df["sn_curve"] = "140"
         return df
 
-    def _read_attachment_loads(self):
+    def _excel_input_read(self):
         '''
+        Read excel input sheet and check verify that all .csv files to be processed are listen in input
 
-
-        :return:
-        :rtype: pd.DataFrame
         '''
         'Find position of data entries'
-        header_indexes, header_labels = excel_sheet_find_input_rows(self.excel_object, "GeneralInput", 0)
+        header_indexes, header_labels = excel_sheet_find_input_rows_by_string(self.excel_object, "GeneralInput", 0)
 
         'Get input for necessary for friction calculations'
-        self.swivel_info = self._get_input_info("GeneralInput", header_indexes[0] + 2, ["Parameter", "Value"])
-        self.clevis_info = self._get_input_info("GeneralInput", header_indexes[1] + 2, ["Parameter", "Value"])
-        self.general_info = self._get_input_info("GeneralInput", header_indexes[2] + 2, ["Parameter", "Value"])
+        self.swivel_info = self._get_input_info("GeneralInput", header_indexes[0] + 2)["value"]
+        self.clevis_info = self._get_input_info("GeneralInput", header_indexes[1] + 2)["value"]
+        self.general_info = self._get_input_info("GeneralInput", header_indexes[2] + 2)["value"]
         self.sn_info = self._get_input_info(
             "GeneralInput",
             header_indexes[3] + 2,
-            self.sn_input_columns,
             True
         )
         self.sn_info = {f"{x}": y for x, y in self.sn_info.items()}
 
         'Get input on file names and check if files are present'
-        self.line_file_name_info = self._get_input_info("FileInput", 0, ["Line name:", "File name:", "Insulator sets:"])
-        self.line_file_name_info = {y: x for x, y in self.line_file_name_info.items()}
-        file_objects_defined_in_input_file(self.csv_objects, list(self.line_file_name_info.keys()))
+        self.line_file_name_info = self._get_input_info("FileInput", 0)
 
+        'Exit code if input list is not complete'
+        file_objects_defined_in_input_file(
+            self.csv_objects,
+            np.array([[x, y] for x, y in self.line_file_name_info["file_name"].items()])[:, 1]
+        )
+
+    def _read_attachment_loads(self):
+        '''
+        Read and store all data relevant for fatigue calculations of insulator cold end clevis
+
+        :return: Dataframe containing all necessary information for fatigue calculations
+        :rtype: pd.DataFrame
+        '''
         'Read loads from csv files. calculate stem stresses and store maximum stress ranges'
         df = self._dataframe_setup()
 
@@ -199,13 +224,12 @@ class TowerColdEndFittingFatigue:
 
         return df
 
-    def _get_input_info(self, sheet, header_row, header_columns, transpose=False):
+    def _get_input_info(self, sheet, header_row, transpose=False):
         '''
         Function to read swivel, clevis or friction info, as specified in Excel sheet, and store in self
 
         :param str sheet: Sheet name which data shall be extracted from
         :param int header_row: Index to specify header row of Dataframe
-        :param list header_columns: Columns specifying header column of Dataframe
         :param bool transpose: Transpose dictionary in case of S-N data
 
         :return: Information for friction calculations
@@ -214,19 +238,23 @@ class TowerColdEndFittingFatigue:
         df = self.excel_object.parse(
             index_col=None,
             skiprows=header_row,
-            sheet_name=sheet,
-            usecols=header_columns
+            sheet_name=sheet
         )
-        df = dataframe_filter_only_above_nas(df, header_columns[1])
+        df = dataframe_filter_only_above_nas(df, 0)
+        df = dataframe_filter_only_columns_without_nas(df)
 
         'Convert to coding names, i.e. without spaces and special signs. See __init__ for conversion dictionary'
-        df.loc[:, header_columns[0]] = df.loc[:, header_columns[0]].map(
+        df.iloc[:, 0] = df.iloc[:, 0].map(
             lambda x: self.convert_names_general[x] if x in self.convert_names_general else x
         )
-        df = df.set_index([header_columns[0]])
-        df.columns = df.columns.map(lambda x: x.lower())
 
-        return df.transpose().to_dict() if transpose else df.to_dict()[header_columns[1].lower()]
+        df.iloc[:, 0] = df.iloc[:, 0].map(lambda x: x.lower() if type(x) is str else x)
+        df = df.set_index(df.columns[0])
+        df.columns = df.columns.map(
+            lambda x: self.convert_names_general[x] if x in self.convert_names_general else x
+        ).str.lower()
+
+        return df.transpose().to_dict() if transpose else df.to_dict()
 
     def _dataframe_setup(self):
         '''
@@ -387,7 +415,7 @@ class TowerColdEndFittingFatigue:
         excel_obj = pd.ExcelFile(os.path.join(self.path_input, self.file_name))
         return excel_obj
 
-    def _init_csv_objects(self):
+    def _init_csv_files(self):
         """
         Function to return all 'csv' files in folder
 
@@ -434,6 +462,138 @@ class TowerColdEndFittingFatigue:
                     writer,
                     sheet_name=str(tow)
                 )
+
+
+class ReadCAandSetInformation:
+    def __init__(self, input_object):
+        '''
+
+        :param TowerColdEndFittingFatigue input_object:
+        '''
+        self.input = input_object
+        # self.line_file_name_info = input_object.line_file_name_info
+        self.file_types = {
+            "Lines CA - With Detailed Data_Detailed Lines CA Data": "ca_info",
+            "Lines Overview Dashboard_Lines - Asset Attributes": "set_info"
+        }
+        self.file_name_info = {}
+        'Dictionary to convert names from Excel to code format'
+        self.convert_names_ca = {
+            'Asset': 'asset',
+            'Asset Description': 'asset_description',
+            'Device Position': 'device_position',
+            'Asset Location': 'asset_location',
+            'Year Of Manufacture': 'year',
+            'Meter Name': 'position_id',
+            'Meter Description': 'position_name',
+            'Measurement': 'measurement',
+            '1 to 10': '1-10',
+            '> 10 to 20': '10-30',
+            '> 20 to 30': '20-30',
+            '> 30 to 40': '30-40',
+            '> 40 to 50': '40-50',
+            '> 50 to 60': '50-60',
+            '> 60 to 70': '60-70',
+            '> 70 to 80': '70-80',
+            '> 80 to 90': '80-90',
+            '> 90 to 100': '90-100',
+            'Totals': 'total',
+            'Measurement Date': 'date',
+            'Measurement Comment': 'comment',
+        }
+
+    @classmethod
+    def setup(cls, input_object):
+        '''
+
+        :param TowerColdEndFittingFatigue input_object: Class object to inherit input data from
+        :return:
+        '''
+        cls_obj = cls(input_object)
+        cls_obj._init_excel_file_list()
+        'Check if lines listed in input is present in CA input folder'
+        file_objects_defined_in_input_file(
+            np.array([[x, y] for x, y in cls_obj.input.line_file_name_info["file_name"].items()])[:, 0],
+            list(cls_obj.file_name_info.keys())
+        )
+        'Read CA values'
+        cls_obj._excel_read_ca("bpe-hay-a", "Susp Cold End Condition")
+
+        a=1
+
+    def _excel_read_ca(self, line_name, position):
+        '''
+
+        :param str line_name: Line name ID
+        :param str position: Measurement position to be chosen
+
+        :return:
+        :rtype: pd.DataFrme
+        '''
+        'Find position of data entries'
+        sheet = "Detailed Lines CA Data"
+        table_string = "Insulators & Hardware"
+
+        file_name = self.file_name_info[line_name]["ca_file"]
+
+        excel_object = self._init_excel_object(file_name)
+        header_indexes, header_labels = excel_sheet_find_input_rows_by_string(
+            excel_object, sheet, 0, -1, "Asset"
+        )
+        row = header_indexes[header_labels.index(table_string)]
+        df = dataframe_from_excel_object(excel_object, sheet, row + 2, 0)
+        df.columns = df.columns.map(
+            lambda x: self.convert_names_ca[x] if x in self.convert_names_ca else x
+        )
+        df = df.loc[
+             :,
+             ["asset_description", "asset_location", "device_position", "year", "position_name", "measurement", "date"]
+             ]
+        df = df.loc[df.loc[:, "position_name"] == position, :]
+        df["line_id"] = line_name
+        df["structure_number"] = df.apply(lambda x: x["device_position"].lower().replace(x["line_id"], ""), axis=1)
+        df["circuit"] = df.loc[:, "asset_location"].map(lambda x: x.split("-")[-1])
+        df = df.loc[:, ["line_id", "structure_number", "circuit", "measurement", "year", "date", "asset_description"]]
+        df = df.sort_values(by=["structure_number", "circuit"])
+        a=1
+
+    def _init_excel_object(self, file_name):
+        '''
+        Open Excel object for read
+
+        :param str file_name: File to be processed
+
+        :return All Excel sheets stored in object for data extraction
+        :rtype pandas.ExcelFile ExcelObj
+        '''
+
+        excel_obj = pd.ExcelFile(os.path.join(self.input.path_ca, file_name))
+
+        return excel_obj
+
+    def _init_excel_file_list(self):
+        """
+        Function to return all Excel files in folder and store in self.file_name_info
+
+        """
+        file_names = os.listdir(self.input.path_ca)
+        file_types = list(self.file_types.keys())
+        line_info = {}
+
+        'Store only files containing CA and insulator information'
+        for file_name in file_names:
+            f = Path(file_name).stem
+            file_type = f[f.index(" ")+1:]
+            line_name = f[:f.index(" ")].lower()
+            if (Path(file_name).suffix.strip(".") == "xlsx") and (file_type in file_types):
+                if line_name not in line_info.keys():
+                    line_info[line_name] = {}
+                if "ca" in file_type.lower():
+                    line_info[line_name].update({"ca_file": file_name})
+                else:
+                    line_info[line_name].update({"set_file": file_name})
+
+        self.file_name_info = line_info
 
 
 if __name__ == '__main__':

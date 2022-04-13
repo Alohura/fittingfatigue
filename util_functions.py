@@ -15,14 +15,27 @@ def dataframe_filter_only_above_nas(df, header_column):
     Filter to store only relevant list values, i.e. only part of dataframe above first nan entry
 
     :param pd.DataFrame df: Dataframe to be filtered
-    :param str header_column: Column in dataframe to search for NaN values
+    :param int header_column: Column in dataframe to search for NaN values
 
     :return: Filtered dataframe
     :rtype: pd.DataFrame
     '''
-    na_indexes = list(np.flatnonzero(df.loc[:, header_column].isna()))  # Find NaN cells to define where lists end
+    na_indexes = list(np.flatnonzero(df.iloc[:, header_column].isna()))  # Find NaN cells to define where lists end
 
     return df.iloc[0:na_indexes[0], :] if len(na_indexes) > 0 else df
+
+
+def dataframe_filter_only_columns_without_nas(df):
+    '''
+    Filter to store only relevant list values, i.e. only part of dataframe above first nan entry
+
+    :param pd.DataFrame df: Dataframe to be filtered
+
+    :return: Filtered dataframe
+    :rtype: pd.DataFrame
+    '''
+
+    return df.loc[:, ~df.isna().all()]
 
 
 def friction_torsion_resistance_swivel_t1(friction, force, r_out, r_in):
@@ -331,29 +344,51 @@ def dataframe_add_swing_angle(df, col_label, components=["vertical", "transversa
     return df
 
 
-def excel_sheet_find_input_rows(excel_object, sheet, column):
+def excel_sheet_find_input_rows_by_string(excel_object, sheet, column, offset=0, start_string="#"):
     '''
-    Read PLS_Input sheet to find row indexes which starts with "#" in the relevant tables in sheet
+    Read PLS_Input sheet to find row indexes which starts with "start_string" in the relevant tables in sheet
 
     :param pd.ExcelFile excel_object: Input ExcelFile object
     :param str sheet: Name of sheet to read
     :param str column: Column to search for NaN's in
+    :param offset: Offset relative to the location of "start_string". - upwards, + downwards
+    :param str start_string: String by which headers all start
     
     :return: Lists storing indexes and headers of input 
-    :rtype: tuple
+    :rtype: (list, list)
     '''
     inp_df = excel_object.parse(
-        # index_col=column,
         skiprows=0,
         sheet_name=sheet,
     )
 
-    a = 1
-    header_rows = inp_df.iloc[:, column].fillna("").str.startswith("#").dropna()
-    header_row_indexes = list(np.flatnonzero(header_rows))
+    header_rows = inp_df.iloc[:, column].fillna("").str.startswith(start_string).dropna()
+    header_row_indexes = list(np.flatnonzero(header_rows) + offset)
     header_row_labels = list(inp_df.iloc[:, column][header_row_indexes])
 
     return header_row_indexes, header_row_labels
+
+
+def dataframe_from_excel_object(excel_object, sheet, row, column=0):
+    '''
+
+
+    :param pd.ExcelFile excel_object: Input ExcelFile object
+    :param str sheet: Name of sheet to read
+    :param int row: First row in Excel sheet to extract data
+    :param int column: First column in Excel sheet to extract data
+
+    :return: Dataframe
+    :rtype: pd.DataFrame
+    '''
+    df = excel_object.parse(
+        skiprows=row,
+        sheet_name=sheet,
+    )
+    df = dataframe_filter_only_above_nas(df, 0)
+    df = dataframe_filter_only_columns_without_nas(df)
+
+    return df
 
 
 def fatigue_damage_from_histogram(stress_max, histogram, sn_curve):
@@ -480,3 +515,7 @@ def list_items_move(input_list, sorting_items):
                      + input_list[index_new + 1:index_from] + input_list[index_from + 1:]
 
     return input_list
+
+
+def convert_names(x, convert):
+    return convert[x] if x in convert else x

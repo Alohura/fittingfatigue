@@ -81,4 +81,6 @@ columns = list_items_move(
 )
 print(columns)
 
+if type("str") is str: print("ja")
+
 
