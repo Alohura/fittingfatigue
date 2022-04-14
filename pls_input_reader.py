@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import pickle
 from pathlib import Path
 from time import time
 from util_functions import *  # split_word_to_list, intersect_of_2_lists, dataframe_filter_only_above_nas
@@ -8,13 +9,15 @@ from util_functions import *  # split_word_to_list, intersect_of_2_lists, datafr
 time0 = time()
 time1 = time()
 
+
 def main():
     path_pls_input = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
+    # path_pls_input = r""
     path_ca_input = r"C:\Users\AndreasLem\Groundline\NZ-6500 Insulator Cold End Failure Investigation - Documents\03 Operations\01_Inputs\01_Line Asset"
     input_file = "ClevisFatigue_Input.xlsx"
     results_file = "line_summary.xlsx"
     time0 = time()
-    TowerColdEndFittingFatigue.fatigue_damage(path_pls_input, path_ca_input, input_file, results_file)
+    TowerColdEndFittingFatigue.fatigue_damage(path_pls_input, path_ca_input, input_file, results_file, True)
 
 
 class TowerColdEndFittingFatigue:
@@ -116,7 +119,7 @@ class TowerColdEndFittingFatigue:
         self.csv_objects = self._init_csv_files()
 
     @classmethod
-    def fatigue_damage(cls, path, path_ca, input_file, results_file):
+    def fatigue_damage(cls, path, path_ca, input_file, results_file, read_pickle=False):
         '''
         Calculate fatigue damage of insulators from PLS-CADD structure attachment loading, input values from
         "input_file", condition assessment (CA) values from files in folder "path_ca" and store to "results_file"
@@ -125,13 +128,20 @@ class TowerColdEndFittingFatigue:
         :param str path_ca: Path to folder with OBIEE reports containing CA values and insulator set information
         :param str input_file: Excel input file manually filled out prior to analysis
         :param str results_file: Name of Excel file results are written to
+        :param bool read_pickle: Allows for reading of pickled Excel OBIIE input, as reading is quite time consuming
 
         '''
         cls_obj = cls(path, path_ca, input_file, results_file)
         cls_obj._excel_input_read()
-        ReadCAandSetInformation.setup(cls_obj)
+        if read_pickle:
+            with open(os.path.join(cls_obj.path_ca, "pickle_ca.p"), "rb") as f:
+                df_ca = pickle.load(f)
+        else:
+            df_ca = ReadCAandSetInformation.setup(cls_obj)
+            with open(os.path.join(cls_obj.path_ca, "pickle_ca.p"), "wb") as f:
+                pickle.dump(df_ca, f)
         df = cls_obj._read_attachment_loads()
-        df = cls_obj._ca_value_map_to_sn_detail(df)
+        df = cls_obj._ca_value_map_to_sn_detail(df, df_ca)
         df = cls_obj._calculate_fatigue_damage(df)
         cls_obj._write_to_excel(df, "line_id", ["damage"])
 
@@ -152,15 +162,26 @@ class TowerColdEndFittingFatigue:
 
         return df.sort_values(by="damage", ascending=False)
 
-    def _ca_value_map_to_sn_detail(self, df):
+    def _ca_value_map_to_sn_detail(self, df, df_ca):
         '''
 
-        :param df:
+        :param pd.DataFrame df:
+        :param pd.DataFrame df_ca:
 
         :return:
         :rtype: pd.DataFrame
         '''
-        df["sn_curve"] = "140"
+        # a = df_ca.loc[(df_ca.loc[:, "line_id"] == "alb-hpi-a") & (df_ca.loc[:, "structure_number"] == "424"), "ca_max"].values[0]
+        df["ca"] = df.apply(
+            lambda x: df_ca.loc[
+                (df_ca.loc[:, "line_id"] == x["line_id"]) & (df_ca.loc[:, "structure_number"] == x["structure_number"])
+                , "ca_max"
+            ].values,
+            axis=1
+        )
+        df.loc[:, "ca"] = df.loc[:, "ca"].map(lambda x: x[0] if len(x) > 0 else 100.)
+        df["sn_curve"] = df.loc[:, "ca"].map(lambda x: sn_from_ca_values(x, self.sn_info))
+
         return df
 
     def _excel_input_read(self):
@@ -180,6 +201,7 @@ class TowerColdEndFittingFatigue:
             header_indexes[3] + 2,
             True
         )
+        self.sn_info = sn_curve_add_ca_list(self.sn_info)
         self.sn_info = {f"{x}": y for x, y in self.sn_info.items()}
 
         'Get input on file names and check if files are present'
@@ -264,8 +286,9 @@ class TowerColdEndFittingFatigue:
         :return: Dataframe containing all necessary input for fatigue evaluations and control checks
         :rtype: pd.DataFrame
         '''
-        for file_name in self.csv_objects:
-            df = pd.read_csv(os.path.join(self.path_input, file_name))
+        df_list = [0 for file_name in self.csv_objects]
+        for i, file_name in enumerate(self.csv_objects):
+            df = pd.read_csv(os.path.join(self.path_input, file_name), low_memory=False)
 
             'Convert names to code names, ref. dictionaries for converting names in __init__ module'
             df.columns = df.columns.map(lambda x: self.convert_names_pls[x] if x in self.convert_names_pls else x)
@@ -277,8 +300,12 @@ class TowerColdEndFittingFatigue:
             )
             df = dataframe_remove_columns(df, ["ahead", "back"])
 
+            'Convert structure_number column, to keep consistent across lines, i.e. in case of "a", "b" extensions etc.'
+            df.loc[:, "structure_number"] = df.loc[:, "structure_number"].map(str)
+
             'Add line ID to uniquely identify each line'
-            df["line_id"] = self.line_file_name_info[file_name]
+            file_to_line_id = {y: x for x, y in self.line_file_name_info["file_name"].items()}
+            df["line_id"] = file_to_line_id[file_name]
 
             'Process data and calculate moments'
             df["resultant"] = df.apply(
@@ -294,7 +321,9 @@ class TowerColdEndFittingFatigue:
             'Store nominal values'
             df = dataframe_add_nominal_values(df, df_nom)
 
-        return df
+            df_list[i] = df
+
+        return pd.concat(df_list)
 
     def _maximum_force_and_stress_range(self, df, set_column="set_no", tow_column="structure_number"):
         '''
@@ -452,7 +481,11 @@ class TowerColdEndFittingFatigue:
         )
         df = df.loc[:, columns]
         with pd.ExcelWriter(file_name) as writer:
-            for tow, res in df.groupby(group_col):
+            df.to_excel(
+                writer,
+                sheet_name="Summary"
+            )
+            for group, res in df.groupby(group_col):
                 if len(sort_cols) > 0:
                     res = res.sort_values(by=sort_cols, ascending=False)
                 res.columns = res.columns.map(
@@ -460,7 +493,7 @@ class TowerColdEndFittingFatigue:
                 )
                 res.to_excel(
                     writer,
-                    sheet_name=str(tow)
+                    sheet_name=str(group)
                 )
 
 
@@ -529,7 +562,7 @@ class ReadCAandSetInformation:
         #     "Susp Cold End Condition"
         # )
 
-        a=1
+        return df
 
     def _excel_read_ca_file_all(self, sheet, table_string, position):
         '''
@@ -612,7 +645,6 @@ class ReadCAandSetInformation:
             df1["circuit2"] = df2.loc[:, "circuit"]
             df1["circuit1"] = df1.loc[:, "circuit"]
             df = df1
-
         else:
             df["ca_1"] = df.loc[:, "measurement"]
             df["ca_2"] = df.loc[:, "measurement"]
@@ -630,6 +662,9 @@ class ReadCAandSetInformation:
                  "asset_description"
              ]
              ]
+
+        'Strip leading zeros from structure_number column'
+        df.loc[:, "structure_number"] = df.loc[:, "structure_number"].str.lstrip("0")
 
         return df
 
@@ -660,10 +695,12 @@ class ReadCAandSetInformation:
         for file_name in file_names:
             if os.path.isdir(os.path.join(self.input.path_ca, file_name)):
                 continue
+            if Path(file_name).suffix.strip(".") != "xlsx":
+                continue
             f = Path(file_name).stem
             file_type = f[f.index(" ")+1:]
             line_name = f[:f.index(" ")].lower()
-            if (Path(file_name).suffix.strip(".") == "xlsx") and (file_type in file_types):
+            if file_type in file_types:
                 if line_name not in line_info.keys():
                     line_info[line_name] = {}
                 if "ca" in file_type.lower():

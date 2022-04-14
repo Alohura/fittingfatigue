@@ -519,3 +519,37 @@ def list_items_move(input_list, sorting_items):
 
 def convert_names(x, convert):
     return convert[x] if x in convert else x
+
+
+def sn_from_ca_values(ca, sn_curves):
+    '''
+
+    :param float ca:
+    :param dict sn_curves:
+
+    :return:
+    :rtype: dict
+    '''
+    curve_keep = list(sn_curves.keys())[-1]
+    for curve, sn in sn_curves.items():
+        if sn["ca_list"][0] < float(ca) <= sn["ca_list"][1]:
+            curve_keep = curve
+
+    return curve_keep
+
+
+def sn_curve_add_ca_list(sn_curves):
+    '''
+    Function to split CA value string into two-value list
+
+    :param dict sn_curves:
+
+    :return: SN curve with [to, from] CA value list
+    :rtype: dict
+    '''
+
+    for curve, sn in sn_curves.items():
+        ca_vals = [float(x) for x in sn["ca"].split("-")]
+        sn_curves[curve].update({"ca_list": ca_vals})
+
+    return sn_curves
