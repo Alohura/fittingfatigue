@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy import optimize
+from collections import OrderedDict
 
 def split_word_to_list(input_string):
     return [str_char for str_char in input_string]
@@ -553,3 +554,35 @@ def sn_curve_add_ca_list(sn_curves):
         sn_curves[curve].update({"ca_list": ca_vals})
 
     return sn_curves
+
+
+def lists_add_and_flatten(lists_input):
+    '''
+
+    :param list lists_input: List of lists to be added and flattened
+
+    :return: Sum of input lists, flattened in case of 2D lists
+    :rtype: list
+    '''
+    'Initialize columns to be read and stored'
+    columns_start = ["line_id", "structure_number"]
+    columns_end = ["circuit1", "circuit2"]
+    list_return = []
+    for lst in lists_input:
+        list_return += lst
+
+    return remove_duplicates_from_list(
+        [x for x in list_return if type(x) is not list] + [x for x in list_return if type(x) is list][0]
+    )
+
+
+def remove_duplicates_from_list(input_list):
+    '''
+    Function to remove duplicates in list
+
+    :param list input_list:
+    :return: Reorganized list
+    :rtype: list
+    '''
+
+    return list(OrderedDict.fromkeys(input_list))
