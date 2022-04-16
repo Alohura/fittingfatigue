@@ -1,3 +1,5 @@
+import collections
+
 import numpy as np
 from util_functions import *
 
@@ -89,4 +91,10 @@ print(max("2a", "1d"))
 my_list = [1, 2, [2, 3]]
 new_list = [x for x in my_list if type(x) is not list] + [x[:] for x in my_list if type(x) is list][0]
 print(new_list)
+print("12".split(","))
+lst1 = [1,2,3]
+lst2 = [3,5,"6"]
+print(collections.Counter(lst1))
+print(collections.Counter(lst2))
+print(check_overlap_between_two_lists(lst1, lst2))
 

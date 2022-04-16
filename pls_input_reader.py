@@ -11,13 +11,13 @@ time1 = time()
 
 
 def main():
-    path_pls_input = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
-    # path_pls_input = r""
+    # path_pls_input = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
+    path_pls_input = r"C:\Users\AndreasLem\Groundline\NZ-6500 Insulator Cold End Failure Investigation - Documents\03 Operations\04_Analyses\Load input"
     path_ca_input = r"C:\Users\AndreasLem\Groundline\NZ-6500 Insulator Cold End Failure Investigation - Documents\03 Operations\01_Inputs\01_Line Asset"
     input_file = "ClevisFatigue_Input.xlsx"
     results_file = "line_summary.xlsx"
     time0 = time()
-    TowerColdEndFittingFatigue.fatigue_damage(path_pls_input, path_ca_input, input_file, results_file, True)
+    TowerColdEndFittingFatigue.fatigue_damage(path_pls_input, path_ca_input, input_file, results_file, True, True)
 
 
 class TowerColdEndFittingFatigue:
@@ -119,7 +119,7 @@ class TowerColdEndFittingFatigue:
         self.csv_objects = self._init_csv_files()
 
     @classmethod
-    def fatigue_damage(cls, path, path_ca, input_file, results_file, read_pickle=False):
+    def fatigue_damage(cls, path, path_ca, input_file, results_file, read_pickle_ca=False, read_pickle=False):
         '''
         Calculate fatigue damage of insulators from PLS-CADD structure attachment loading, input values from
         "input_file", condition assessment (CA) values from files in folder "path_ca" and store to "results_file"
@@ -128,20 +128,42 @@ class TowerColdEndFittingFatigue:
         :param str path_ca: Path to folder with OBIEE reports containing CA values and insulator set information
         :param str input_file: Excel input file manually filled out prior to analysis
         :param str results_file: Name of Excel file results are written to
-        :param bool read_pickle: Allows for reading of pickled Excel OBIIE input, as reading is quite time consuming
+        :param bool read_pickle_ca: Allows for reading of pickled Excel OBIIE input, as reading is quite time consuming
+        :param bool read_pickle: Allows for reading of pickled results, as reading is quite time consuming
 
         '''
         cls_obj = cls(path, path_ca, input_file, results_file)
         cls_obj._excel_input_read()
-        if read_pickle:
-            with open(os.path.join(cls_obj.path_ca, "pickle_ca.p"), "rb") as f:
-                [df_ca, df_set] = pickle.load(f)
+        'Read pickle or process OBIEE CA and set information dataframe'
+        if read_pickle_ca:
+            if os.path.exists(os.path.join(cls_obj.path_ca, "pickle_ca.p")):
+                with open(os.path.join(cls_obj.path_ca, "pickle_ca.p"), "rb") as f:
+                    [df_ca, df_set] = pickle.load(f)
+            else:
+                df_ca, df_set = ReadCAAndSetInformation.setup(cls_obj)
         else:
             df_ca, df_set = ReadCAAndSetInformation.setup(cls_obj)
             with open(os.path.join(cls_obj.path_ca, "pickle_ca.p"), "wb") as f:
                 pickle.dump([df_ca, df_set], f)
-        df = cls_obj._read_attachment_loads()
-        df = cls_obj._ca_value_map_to_sn_detail(df, df_ca)
+
+        'Read pickle or process main dataframe'
+        dataframe_process = False
+        if read_pickle:
+            if os.path.exists(os.path.join(cls_obj.path_input, "pickle_df.p")):
+                with open(os.path.join(cls_obj.path_input, "pickle_df.p"), "rb") as f:
+                    df = pickle.load(f)
+            else:
+                dataframe_process = True
+        else:
+            dataframe_process = True
+
+        if dataframe_process:
+            df = cls_obj._read_attachment_loads()
+            df = cls_obj._ca_value_map_to_sn_detail(df, df_ca, ca_default=100.)
+            df = cls_obj._line_and_tower_to_set_name_map(df, df_set)
+            with open(os.path.join(cls_obj.path_input, "pickle_df.p"), "wb") as f:
+                pickle.dump(df, f)
+
         df = cls_obj._calculate_fatigue_damage(df)
         cls_obj._write_to_excel(df, "line_id", ["damage"])
 
@@ -162,16 +184,47 @@ class TowerColdEndFittingFatigue:
 
         return df.sort_values(by="damage", ascending=False)
 
-    def _ca_value_map_to_sn_detail(self, df, df_ca):
+    def _line_and_tower_to_set_name_map(self, df, df_set):
         '''
+        Function to map line and tower id's to to set names
 
-        :param pd.DataFrame df:
-        :param pd.DataFrame df_ca:
+        :param pd.DataFrame df: Dataframe to be processed
+        :param pd.DataFrame df_set: Dataframe containing set names for a range of lines
 
-        :return:
+        :return: Dataframe updated with set names
         :rtype: pd.DataFrame
         '''
-        # a = df_ca.loc[(df_ca.loc[:, "line_id"] == "alb-hpi-a") & (df_ca.loc[:, "structure_number"] == "424"), "ca_max"].values[0]
+        'Map set information from set dataframe'
+        df["set_name"] = df.apply(
+            lambda x: df_set.loc[
+                (df_set.loc[:, "line_id"] == x["line_id"]) & (df_set.loc[:, "structure_number"] == x["structure_number"])
+                , "set_name"
+            ].values,
+            axis=1
+        )
+        'Search for set for set names in critical set list'
+        df["critical_set"] = df.apply(
+            lambda x: check_overlap_between_two_lists(
+                x["set_name"],
+                self.line_file_name_info["insulator"][x["line_id"]]
+            ),
+            axis=1
+        )
+
+        return df
+
+    def _ca_value_map_to_sn_detail(self, df, df_ca, ca_default):
+        '''
+        Function to map CA values to SN details
+
+        :param pd.DataFrame df: Dataframe to be processed
+        :param pd.DataFrame df_ca: Dataframe containing CA values for a range of lines
+        :param float ca_default: Default CA value, in case it is not given
+
+        :return: Dataframe updated with SN details
+        :rtype: pd.DataFrame
+        '''
+
         df["ca"] = df.apply(
             lambda x: df_ca.loc[
                 (df_ca.loc[:, "line_id"] == x["line_id"]) & (df_ca.loc[:, "structure_number"] == x["structure_number"])
@@ -179,7 +232,7 @@ class TowerColdEndFittingFatigue:
             ].values,
             axis=1
         )
-        df.loc[:, "ca"] = df.loc[:, "ca"].map(lambda x: x[0] if len(x) > 0 else 100.)
+        df.loc[:, "ca"] = df.loc[:, "ca"].map(lambda x: x[0] if len(x) > 0 else ca_default)
         df["sn_curve"] = df.loc[:, "ca"].map(lambda x: sn_from_ca_values(x, self.sn_info))
 
         return df
@@ -206,6 +259,9 @@ class TowerColdEndFittingFatigue:
 
         'Get input on file names and check if files are present'
         self.line_file_name_info = self._get_input_info("FileInput", 0)
+        self.line_file_name_info["insulator"] = {
+            x: y.split(",") for x, y in self.line_file_name_info["insulator"].items()
+        }
 
         'Exit code if input list is not complete'
         file_objects_defined_in_input_file(
@@ -286,6 +342,7 @@ class TowerColdEndFittingFatigue:
         :return: Dataframe containing all necessary input for fatigue evaluations and control checks
         :rtype: pd.DataFrame
         '''
+        print(f"Time to start of csv file read: {time() - time0}")
         df_list = [0 for file_name in self.csv_objects]
         for i, file_name in enumerate(self.csv_objects):
             df = pd.read_csv(os.path.join(self.path_input, file_name), low_memory=False)
@@ -322,6 +379,8 @@ class TowerColdEndFittingFatigue:
             df = dataframe_add_nominal_values(df, df_nom)
 
             df_list[i] = df
+
+            print(f"Time after csv read of {file_name}: {time() - time0}")
 
         return pd.concat(df_list)
 
@@ -487,9 +546,16 @@ class TowerColdEndFittingFatigue:
                 ["joint", "resultant", False],
             ]
         )
+        'Store reorganized columns'
         df = df.loc[:, columns]
+
         with pd.ExcelWriter(file_name) as writer:
-            df.to_excel(
+            'Store summary sheet'
+            df_tmp = df.copy()
+            df_tmp.columns = df_tmp.columns.map(
+                lambda x: self.convert_names_all_back[x] if x in self.convert_names_all_back else x
+            )
+            df_tmp.to_excel(
                 writer,
                 sheet_name="Summary"
             )
@@ -503,6 +569,7 @@ class TowerColdEndFittingFatigue:
                     writer,
                     sheet_name=str(group)
                 )
+
 
 
 class ReadCAAndSetInformation:
@@ -591,7 +658,7 @@ class ReadCAAndSetInformation:
             "circuit": "asset_location",
             "position_column": "suspension",  # Defining ca or set columns
             "lookup": "suspension",  # Defining ca or set
-            "val_max": "set_max",
+            "val_max": "set_name",
             "val_1": "set_1",
             "val_2": "set_2",
             "additional": ["suspension_description"]

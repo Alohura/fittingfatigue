@@ -3,6 +3,7 @@ import pandas as pd
 from scipy import optimize
 from collections import OrderedDict
 
+
 def split_word_to_list(input_string):
     return [str_char for str_char in input_string]
 
@@ -586,3 +587,19 @@ def remove_duplicates_from_list(input_list):
     '''
 
     return list(OrderedDict.fromkeys(input_list))
+
+
+def check_overlap_between_two_lists(lst1, lst2):
+    '''
+
+    :param list lst1:
+    :param list lst2:
+
+    :return: 0 if no overlap between two lists, 1 if overlap
+    :rtype: int
+    '''
+
+    set1, set2 = set(lst1), set(lst2)
+    diff = set1 - set2
+
+    return 0 if len(diff) == len(set1) else 1
