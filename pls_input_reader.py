@@ -17,7 +17,7 @@ def main():
     input_file = "ClevisFatigue_Input.xlsx"
     results_file = "line_summary.xlsx"
     time0 = time()
-    TowerColdEndFittingFatigue.fatigue_damage(path_pls_input, path_ca_input, input_file, results_file, True, True)
+    TowerColdEndFittingFatigue.fatigue_damage(path_pls_input, path_ca_input, input_file, results_file, True, False)
 
 
 class TowerColdEndFittingFatigue:
@@ -26,7 +26,7 @@ class TowerColdEndFittingFatigue:
         self.path_ca = path_ca
         self.file_name = file_name
         self.results_file_name = results_file
-        'Dictionary to convert from naming in Excel sheet to format consistent with python code'
+        'Dictionaries to convert from naming in Excel sheet to format consistent with python code'
         self.convert_names_pls = {
             'Row #': 'row',
             'Str. No.': 'structure_number',
@@ -93,7 +93,33 @@ class TowerColdEndFittingFatigue:
             "SCF axial": "SCF_axial",
             "SCF bending": "SCF_bending"
         }
-        self.convert_names_all = {**self.convert_names_pls, **self.convert_names_general, **self.convert_names_code}
+        self.convert_names_ca_set = {
+            'Asset': 'asset',
+            'Asset Description': 'asset_description',
+            'Device Position': 'device_position',
+            'Asset Location': 'asset_location',
+            'Year Of Manufacture': 'year',
+            'Meter Name': 'position_id',
+            'Meter Description': 'position_name',
+            'Measurement': 'measurement',
+            'Totals': 'total',
+            'Measurement Date': 'date',
+            'Measurement Comment': 'comment',
+            'Circuit': 'circuit',
+            'Strain Fwd Std Assy': 'strain_forward',
+            'Strain Back Std Assy': 'strain_back',
+            'Susp Std Assy': 'suspension',
+            'Susp Ins Type Desc': 'suspension_description',
+            'Condition Assessment': 'ca',
+            'Set Identifyer': 'set_name',
+            'Flag if set identified as critical (1) or not (0)': 'critical_set'
+        }
+        self.convert_names_all = {
+            **self.convert_names_pls,
+            **self.convert_names_general,
+            **self.convert_names_code,
+            **self.convert_names_ca_set
+        }
         self.unit_conversion = {
             'mm': 0.001,
             'cm': 0.01,
@@ -159,13 +185,15 @@ class TowerColdEndFittingFatigue:
 
         if dataframe_process:
             df = cls_obj._read_attachment_loads()
-            df = cls_obj._ca_value_map_to_sn_detail(df, df_ca, ca_default=100.)
+            # df = cls_obj._ca_value_map_to_sn_detail(df, df_ca, ca_default=100.)
             df = cls_obj._line_and_tower_to_set_name_map(df, df_set)
             with open(os.path.join(cls_obj.path_input, "pickle_df.p"), "wb") as f:
                 pickle.dump(df, f)
 
+        df = cls_obj._ca_value_map_to_sn_detail(df, df_ca, ca_default=100.)
         df = cls_obj._calculate_fatigue_damage(df)
         cls_obj._write_to_excel(df, "line_id", ["damage"])
+        print(f"----------Time to finish of all calculations: {time() - time0}----------")
 
     def _calculate_fatigue_damage(self, df):
         '''
@@ -175,6 +203,8 @@ class TowerColdEndFittingFatigue:
         :return:
         :rtype: pd.DataFrame
         '''
+
+        print(f"----------Time to start of fatigue damage calculation: {time() - time0}----------")
         histogram = stress_histogram_en_1991_1_4(300, 2, 3)
 
         df["damage"] = df.apply(
@@ -194,6 +224,9 @@ class TowerColdEndFittingFatigue:
         :return: Dataframe updated with set names
         :rtype: pd.DataFrame
         '''
+
+        print(f"----------Time to start of mapping of set names: {time() - time0}----------")
+
         'Map set information from set dataframe'
         df["set_name"] = df.apply(
             lambda x: df_set.loc[
@@ -213,17 +246,20 @@ class TowerColdEndFittingFatigue:
 
         return df
 
-    def _ca_value_map_to_sn_detail(self, df, df_ca, ca_default):
+    def _ca_value_map_to_sn_detail(self, df, df_ca, ca_default=100., sn_default=1):
         '''
         Function to map CA values to SN details
 
         :param pd.DataFrame df: Dataframe to be processed
         :param pd.DataFrame df_ca: Dataframe containing CA values for a range of lines
         :param float ca_default: Default CA value, in case it is not given
+        :param int sn_default: 0 is highest SN curve, 1 second highest etc., whereas -1 is last curve
 
         :return: Dataframe updated with SN details
         :rtype: pd.DataFrame
         '''
+
+        print(f"----------Time to start of mapping of CA values: {time() - time0}----------")
 
         df["ca"] = df.apply(
             lambda x: df_ca.loc[
@@ -233,7 +269,7 @@ class TowerColdEndFittingFatigue:
             axis=1
         )
         df.loc[:, "ca"] = df.loc[:, "ca"].map(lambda x: x[0] if len(x) > 0 else ca_default)
-        df["sn_curve"] = df.loc[:, "ca"].map(lambda x: sn_from_ca_values(x, self.sn_info))
+        df["sn_curve"] = df.loc[:, "ca"].map(lambda x: sn_from_ca_values(x, self.sn_info, sn_default))
 
         return df
 
@@ -266,7 +302,8 @@ class TowerColdEndFittingFatigue:
         'Exit code if input list is not complete'
         file_objects_defined_in_input_file(
             self.csv_objects,
-            np.array([[x, y] for x, y in self.line_file_name_info["file_name"].items()])[:, 1]
+            np.array([[x, y] for x, y in self.line_file_name_info["file_name"].items()])[:, 1],
+            False
         )
 
     def _read_attachment_loads(self):
@@ -342,9 +379,18 @@ class TowerColdEndFittingFatigue:
         :return: Dataframe containing all necessary input for fatigue evaluations and control checks
         :rtype: pd.DataFrame
         '''
-        print(f"Time to start of csv file read: {time() - time0}")
-        df_list = [0 for file_name in self.csv_objects]
-        for i, file_name in enumerate(self.csv_objects):
+        print(f"----------Time to start of csv file read: {time() - time0}----------")
+        df_list = [
+            0 for file_name in self.csv_objects if file_name in self.line_file_name_info["file_name"].values()
+        ]
+        i = 0
+        for file_name in self.csv_objects:
+            'Check if CSV file in input list'
+            if file_name not in self.line_file_name_info["file_name"].values():
+                print(f"File type '{file_name}' not in excel input sheet. Skipped.")
+                continue
+
+            'Read CSV file'
             df = pd.read_csv(os.path.join(self.path_input, file_name), low_memory=False)
 
             'Convert names to code names, ref. dictionaries for converting names in __init__ module'
@@ -379,6 +425,7 @@ class TowerColdEndFittingFatigue:
             df = dataframe_add_nominal_values(df, df_nom)
 
             df_list[i] = df
+            i += 1
 
             print(f"Time after csv read of {file_name}: {time() - time0}")
 
@@ -535,6 +582,8 @@ class TowerColdEndFittingFatigue:
         :param list sort_cols: Columns to sort on, in prioritized order.
 
         '''
+
+        print(f"----------Time to start of Excel results write: {time() - time0}----------")
         file_name = os.path.join(self.path_input, self.results_file_name)
         'Reorganize order of columns'
         columns = list_items_move(
@@ -544,6 +593,7 @@ class TowerColdEndFittingFatigue:
                 ["set_no", "lc", False],
                 ["resultant", "phase_no", True],
                 ["joint", "resultant", False],
+                ["line_id", "row", True],
             ]
         )
         'Store reorganized columns'
@@ -557,7 +607,8 @@ class TowerColdEndFittingFatigue:
             )
             df_tmp.to_excel(
                 writer,
-                sheet_name="Summary"
+                sheet_name="Summary",
+                index=False
             )
             for group, res in df.groupby(group_col):
                 if len(sort_cols) > 0:
@@ -567,9 +618,9 @@ class TowerColdEndFittingFatigue:
                 )
                 res.to_excel(
                     writer,
-                    sheet_name=str(group)
+                    sheet_name=str(group),
+                    index=False
                 )
-
 
 
 class ReadCAAndSetInformation:
@@ -585,35 +636,6 @@ class ReadCAAndSetInformation:
             "Lines Overview Dashboard_Lines - Asset Attributes": "set_info"
         }
         self.file_name_info = {}
-        'Dictionary to convert names from Excel to code format'
-        self.convert_names = {
-            'Asset': 'asset',
-            'Asset Description': 'asset_description',
-            'Device Position': 'device_position',
-            'Asset Location': 'asset_location',
-            'Year Of Manufacture': 'year',
-            'Meter Name': 'position_id',
-            'Meter Description': 'position_name',
-            'Measurement': 'measurement',
-            '1 to 10': '1-10',
-            '> 10 to 20': '10-30',
-            '> 20 to 30': '20-30',
-            '> 30 to 40': '30-40',
-            '> 40 to 50': '40-50',
-            '> 50 to 60': '50-60',
-            '> 60 to 70': '60-70',
-            '> 70 to 80': '70-80',
-            '> 80 to 90': '80-90',
-            '> 90 to 100': '90-100',
-            'Totals': 'total',
-            'Measurement Date': 'date',
-            'Measurement Comment': 'comment',
-            'Circuit': 'circuit',
-            'Strain Fwd Std Assy': 'strain_forward',
-            'Strain Back Std Assy': 'strain_back',
-            'Susp Std Assy': 'suspension',
-            'Susp Ins Type Desc': 'suspension_description'
-        }
 
     @classmethod
     def setup(cls, input_object):
@@ -629,8 +651,10 @@ class ReadCAAndSetInformation:
         'Check if lines listed in input is present in CA input folder'
         file_objects_defined_in_input_file(
             np.array([[x, y] for x, y in cls_obj.input.line_file_name_info["file_name"].items()])[:, 0],
-            list(cls_obj.file_name_info.keys())
+            list(cls_obj.file_name_info.keys()),
+            False,
         )
+
         'Read CA values'
         columns_lookup = {
             "structure_number": "device_position",
@@ -677,7 +701,7 @@ class ReadCAAndSetInformation:
 
     def _excel_read_ca_set_file_all(self, sheet, header_search, offset, table_string, position, columns_lookup, ca_set):
         '''
-
+        Function to search for files defined in "__init__" as CA or Set info files, and read information into dataframe.
 
         :param str sheet: Name of Excel sheet where data is read
         :param str header_search: Unique string value that defines the start of each table in OBIEE sheet
@@ -688,11 +712,11 @@ class ReadCAAndSetInformation:
         :param dict columns_lookup: Dictionary specifying the columns to be read
         :param str ca_set: "ca" or "set"
 
-        :return:
+        :return: Dataframe containing information for all lines in input folder
         :rtype: pd.DataFrame
         '''
 
-        print(f"Time to start of Excel {ca_set} read: {time() - time0}")
+        print(f"----------Time to start of Excel {ca_set} read: {time() - time0}---------")
         'Define ca or set file to be read'
         excel_lookup = "ca_file" if ca_set == "ca" else "set_file"
 
@@ -716,7 +740,7 @@ class ReadCAAndSetInformation:
                 line_id,
                 position,
                 columns_lookup,
-                self.convert_names
+                self.input.convert_names_ca_set
             )
             excel_object.close()
             i += 1

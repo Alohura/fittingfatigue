@@ -475,27 +475,32 @@ def lists_compare_contents(list1, list2):
     :param list list2:
 
     :return: List of strings
-    :rtype: list
+    :rtype: (list, list)
     '''
 
-    return_list = [f"File: '{x}' not in input list, please update.\n" for x in list1 if x not in list2]
+    item_list = [x for x in list1 if x not in list2]
+    string_list = [f"File: '{x}' not in input list, please update.\n" for x in item_list]
 
-    return return_list
+    return item_list, string_list
 
 
-def file_objects_defined_in_input_file(file_objects, input_list):
+def file_objects_defined_in_input_file(file_objects, input_list, exit_code=True):
     '''
     Function to check if list of file objects to be processed are specified in input list. Exit if not, with
     printout of missing objects in input list.
 
     :param list file_objects: List of file objects to be processed
     :param list input_list: Input list connecting file objects with IDs specified in input sheet
+    :param bool exit_code: Specify if code to exit or continue running
 
     '''
-    file_list = lists_compare_contents(file_objects, input_list)
+
+    file_list, string_list = lists_compare_contents(file_objects, input_list)
     if len(file_list) > 0:
-        print("".join(file_list))
-        exit()
+        if exit_code:
+            print(exit_code)
+            print("".join(string_list))
+            exit()
 
 
 def list_items_move(input_list, sorting_items):
@@ -523,16 +528,18 @@ def convert_names(x, convert):
     return convert[x] if x in convert else x
 
 
-def sn_from_ca_values(ca, sn_curves):
+def sn_from_ca_values(ca, sn_curves, default_curve=-1):
     '''
+    Function looking up SN parameters given a condition assessment (CA) value
 
-    :param float ca:
-    :param dict sn_curves:
+    :param float ca: Transpower condition assessment value, between 0 - 100
+    :param dict sn_curves: Dictionary storing SN parameters for all defined SN curves
+    :param int default_curve: 0 is highest SN curve, 1 second highest etc., whereas -1 is last curve
 
     :return:
     :rtype: dict
     '''
-    curve_keep = list(sn_curves.keys())[-1]
+    curve_keep = list(sn_curves.keys())[default_curve]
     for curve, sn in sn_curves.items():
         if sn["ca_list"][0] < float(ca) <= sn["ca_list"][1]:
             curve_keep = curve
@@ -552,6 +559,8 @@ def sn_curve_add_ca_list(sn_curves):
 
     for curve, sn in sn_curves.items():
         ca_vals = [float(x) for x in sn["ca"].split("-")]
+        if sum(ca_vals) == 0:
+            ca_vals = [-2., -1.]
         sn_curves[curve].update({"ca_list": ca_vals})
 
     return sn_curves
