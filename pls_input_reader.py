@@ -185,7 +185,6 @@ class TowerColdEndFittingFatigue:
 
         if dataframe_process:
             df = cls_obj._read_attachment_loads()
-            # df = cls_obj._ca_value_map_to_sn_detail(df, df_ca, ca_default=100.)
             df = cls_obj._line_and_tower_to_set_name_map(df, df_set)
             with open(os.path.join(cls_obj.path_input, "pickle_df.p"), "wb") as f:
                 pickle.dump(df, f)
@@ -227,14 +226,17 @@ class TowerColdEndFittingFatigue:
 
         print(f"----------Time to start of mapping of set names: {time() - time0}----------")
 
+        'Set up dictionary to speed up lookup operations'
+        df_set = dataframe_aggregate_by_specific_column(df_set, "set_name")
+
+        set_dict = df_set.transpose().to_dict()
+
         'Map set information from set dataframe'
         df["set_name"] = df.apply(
-            lambda x: df_set.loc[
-                (df_set.loc[:, "line_id"] == x["line_id"]) & (df_set.loc[:, "structure_number"] == x["structure_number"])
-                , "set_name"
-            ].values,
+            lambda x: ca_and_set_value_from_dict(x["line_id"] + "_" + x["structure_number"], set_dict, "set_name", []),
             axis=1
         )
+
         'Search for set for set names in critical set list'
         df["critical_set"] = df.apply(
             lambda x: check_overlap_between_two_lists(
@@ -261,14 +263,19 @@ class TowerColdEndFittingFatigue:
 
         print(f"----------Time to start of mapping of CA values: {time() - time0}----------")
 
+        'Set up dictionary to speed up lookup operations'
+        df_ca["line_structure"] = df_ca.loc[:, "line_id"] + "_" + df_ca.loc[:, "structure_number"]
+        df_ca = df_ca.set_index("line_structure")
+
+        ca_dict = df_ca.transpose().to_dict()
+
+        'Map CA values'
         df["ca"] = df.apply(
-            lambda x: df_ca.loc[
-                (df_ca.loc[:, "line_id"] == x["line_id"]) & (df_ca.loc[:, "structure_number"] == x["structure_number"])
-                , "ca_max"
-            ].values,
+            lambda x: ca_and_set_value_from_dict(x["line_id"] + "_" + x["structure_number"], ca_dict, "ca_max", ca_default),
             axis=1
         )
-        df.loc[:, "ca"] = df.loc[:, "ca"].map(lambda x: x[0] if len(x) > 0 else ca_default)
+        df.loc[:, "ca"] = df.loc[:, "ca"].astype(float)
+
         df["sn_curve"] = df.loc[:, "ca"].map(lambda x: sn_from_ca_values(x, self.sn_info, sn_default))
 
         return df
@@ -305,6 +312,7 @@ class TowerColdEndFittingFatigue:
             np.array([[x, y] for x, y in self.line_file_name_info["file_name"].items()])[:, 1],
             False
         )
+        self.excel_object.close()
 
     def _read_attachment_loads(self):
         '''
@@ -444,7 +452,8 @@ class TowerColdEndFittingFatigue:
         '''
         'Store dataframe entries for nominal case'
         df_nominal = df.loc[df.loc[:, "lc_description"] == self.general_info["lc_rest"], :]
-        for set_no, item in df.groupby([set_column]):
+        df_list = [0 for x in df.loc[:, set_column].unique()]
+        for i, (set_no, item) in enumerate(df.groupby([set_column])):
             'Find dataframe entries for nominal case'
             item_nominal = item.loc[
                            item.loc[:, "lc_description"] == self.general_info["lc_rest"], :
@@ -465,12 +474,13 @@ class TowerColdEndFittingFatigue:
 
             item_max = item.loc[indx_list, :]
 
-            if "df_return" not in locals():
-                df_return = item_max
-            else:
-                df_return = pd.concat([df_return, item_max])
+            df_list[i] = item_max
+            # if "df_return" not in locals():
+            #     df_return = item_max
+            # else:
+            #     df_return = pd.concat([df_return, item_max])
 
-        return df_return, df_nominal
+        return pd.concat(df_list), df_nominal
 
     def _add_stem_stresses(self, df):
         '''
@@ -529,14 +539,15 @@ class TowerColdEndFittingFatigue:
             axis=1
         )
         df["t_friction"] = df.loc[:, "t1"] + df.loc[:, "t2"]
-        df["m_section"] = df.apply(lambda x: friction_moment_at_critical_section_swivel(
-            x["longitudinal"],
-            force_arm,
-            fraction_to_section,
-            x["t_friction"]
-        ),
-                                   axis=1
-                                   )
+        df["m_section"] = df.apply(
+            lambda x: friction_moment_at_critical_section_swivel(
+                x["longitudinal"],
+                force_arm,
+                fraction_to_section,
+                x["t_friction"]
+            ),
+            axis=1
+        )
 
         return df
 
@@ -602,6 +613,10 @@ class TowerColdEndFittingFatigue:
         with pd.ExcelWriter(file_name) as writer:
             'Store summary sheet'
             df_tmp = df.copy()
+            df_tmp = df_tmp.sort_values(
+                by=["critical_set", "damage", "line_id", "structure_number"],
+                ascending=[False, False, True, True]
+            )
             df_tmp.columns = df_tmp.columns.map(
                 lambda x: self.convert_names_all_back[x] if x in self.convert_names_all_back else x
             )
@@ -678,14 +693,14 @@ class ReadCAAndSetInformation:
 
         'Read set information'
         columns_lookup = {
-            "structure_number": "device_position",
-            "circuit": "asset_location",
-            "position_column": "suspension",  # Defining ca or set columns
-            "lookup": "suspension",  # Defining ca or set
+            "structure_number": "device_position",  # 'Device Position'
+            "circuit": "circuit",  # 'Circuit'
+            "position_column": "suspension",  # Defining ca or set columns  # 'Susp Std Assy'
+            "lookup": "suspension",  # Defining ca or set  # 'Susp Std Assy'
             "val_max": "set_name",
             "val_1": "set_1",
             "val_2": "set_2",
-            "additional": ["suspension_description"]
+            "additional": ["suspension_description"]  # 'Susp Ins Type Desc'
         }
         df_set = cls_obj._excel_read_ca_set_file_all(
             "Lines - Asset Attributes",
@@ -789,6 +804,7 @@ class ReadCAAndSetInformation:
         df.columns = df.columns.map(
             lambda x: convert_names[x] if x in convert_names else x
         )
+        df.fillna(0)
 
         'Add columns to keep relevant information'
         for col in columns_return:
@@ -812,6 +828,10 @@ class ReadCAAndSetInformation:
             lambda x: x[lookup_info["structure_number"]].lower().replace(x["line_id"], ""),
             axis=1
         )
+
+        'Strip leading zeros from structure_number column'
+        df.loc[:, "structure_number"] = df.loc[:, "structure_number"].str.lstrip("0")
+
         df["circuit1"] = df.loc[:, lookup_info["circuit"]].map(lambda x: x.split("-")[-1].replace("0", ""))
         df = df.loc[:, columns_return]
         df["line_structure"] = df.loc[:, "line_id"] + "_" + df.loc[:, "structure_number"]
@@ -828,7 +848,10 @@ class ReadCAAndSetInformation:
             df1, df2 = dfs[shapes.index(max(shapes))], dfs[shapes.index(min(shapes))]
             df1[lookup_info["val_1"]] = df1.loc[:, lookup_info["lookup"]]
             df1[lookup_info["val_2"]] = df2.loc[:, lookup_info["lookup"]]
-            df1[lookup_info["val_max"]] = df1.apply(lambda x: max(x[lookup_info["val_1"]], x[lookup_info["val_2"]]), axis=1)
+            df1[lookup_info["val_max"]] = df1.apply(
+                lambda x: find_max_value_all_types(x[lookup_info["val_1"]], x[lookup_info["val_2"]]),
+                axis=1
+            )
             df1["circuit2"] = df2.loc[:, "circuit1"]
             df = df1
         else:
@@ -840,9 +863,6 @@ class ReadCAAndSetInformation:
 
         'Reorder columns'
         df = df.loc[:, columns_return]
-
-        'Strip leading zeros from structure_number column'
-        df.loc[:, "structure_number"] = df.loc[:, "structure_number"].str.lstrip("0")
 
         return df
 

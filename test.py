@@ -87,15 +87,29 @@ my_dict = {'180': {'m1': 3, 'm2': 5, 's1': 180, 's2': 133, 's3': 73, 'n_s1': 200
 print(sn_from_ca_values(16., my_dict))
 
 print(max("2a", "1d"))
+print(max(2, np.nan))
 
 my_list = [1, 2, [2, 3]]
 new_list = [x for x in my_list if type(x) is not list] + [x[:] for x in my_list if type(x) is list][0]
 print(new_list)
 print("12".split(","))
+
 lst1 = [1,2,3]
 lst2 = [3,5,6]
 lst3 = [7,8,9]
 
 print(sum([0., 0.]))
+
+my_list = np.array([1,2,3,4,5,6,5,7,8,6,9,9,10,1])
+print(np.unique(my_list), np.nonzero(my_list==5), (my_list==5).nonzero())
+print(my_list[np.nonzero(my_list == 5)])
+b=(my_list==5).nonzero()
+my_frame = pd.DataFrame(data=[[1,2,3], [4,5,6], [7,8,9]], columns=["a", "b", "c"])
+
+print(my_frame.iloc[[0, 2], [0, 1]])
+rows = np.array(my_frame.index)
+index_lists = [list((rows == x).nonzero()[0]) for x in np.unique(rows)]
+
+a=1
 
 

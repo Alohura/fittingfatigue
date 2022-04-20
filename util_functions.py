@@ -436,6 +436,34 @@ def dataframe_subtract_one_load_case(df, nominal, parameter, tower_column):
     return df
 
 
+def dataframe_aggregate_by_specific_column(df, group_column):
+    '''
+    Function aggregate dataframe values with same index into one line, where values in group_column are aggregated in
+    list (of length 1 if only 1 entry)
+
+    :param pd.DataFrame df: Dataframe to aggregate
+    :param str group_column: Column to group by
+
+    :return: Aggregated dataframe
+    :rtype: pd.DataFrame
+    '''
+
+    'Find '
+    rows = np.array(df.index)
+    index_lists = [list((rows == x).nonzero()[0]) for x in np.unique(rows)]
+    rows = list(rows)
+    indexes = [rows.index(x) for x in np.unique(rows)]
+    df_new = df.iloc[indexes, :]
+    df = df.reset_index()
+    df_new = df_new.reset_index()
+    columns = list(df.columns)
+
+    df_new.loc[:, group_column] = df_new.apply(lambda x: list(df.iloc[index_lists[x.name], columns.index(group_column)]), axis=1)
+    df_new = df_new.set_index(columns[0])
+
+    return df_new
+
+
 def dataframe_add_nominal_values(df, df_nom, set_column="set_no", tow_column="structure_number"):
     '''
     Function to add loads for nominal load case for each entry.
@@ -566,6 +594,22 @@ def sn_curve_add_ca_list(sn_curves):
     return sn_curves
 
 
+def ca_and_set_value_from_dict(key, inp_dict, return_column, default_value):
+    '''
+    Function to look up set and condition assessment (CA) information
+
+    :param str key: Key in dictionary, for instance "line_structure"
+    :param dict inp_dict: Dictionary containing necessary CA or set info
+    :param str return_column: What column to look up values from
+    :param float default_value: Default value (CA, set) in case key is not in inp_dict
+
+    :return: Condition assessment number
+    :rtype: float
+    '''
+
+    return inp_dict[key][return_column] if key in inp_dict else default_value
+
+
 def lists_add_and_flatten(lists_input):
     '''
 
@@ -612,3 +656,19 @@ def check_overlap_between_two_lists(lst1, lst2):
     diff = set1 - set2
 
     return 0 if len(diff) == len(set1) else 1
+
+
+def find_max_value_all_types(val1, val2):
+    '''
+    Function to find maximum value, and if val1 and val2 of different types, converted to strings.
+
+    :param val1:
+    :param val2:
+
+    :return: Maximum value
+    '''
+    if type(val1) == type(val2):
+        return max(val1, val2)
+    else:
+        ret_list = np.nan_to_num([val1, val2])
+        return max([str(x) for x in ret_list])
