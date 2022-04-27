@@ -283,7 +283,7 @@ def dataframe_remove_columns(df, column_texts):
     return df
 
 
-def dataframe_select_suspension_insulator_sets(df, tow_string, set_string, set_factor, column_texts):
+def dataframe_select_suspension_insulator_sets(df, tow_string, set_string, set_factor, column_texts, ew_sets):
     '''
     Function to search dataframe only for unique tower entries in column "tow_string" where all columns containing
     text in "column_texts" contain non-zero values.
@@ -293,6 +293,7 @@ def dataframe_select_suspension_insulator_sets(df, tow_string, set_string, set_f
     :param str set_string: Column to find unique values for
     :param float set_factor: Factor that average loading of Phase wires / EW is assumed
     :param list column_texts: Text to search for in matching columns
+    :param list ew_sets: EW set IDs according to Transpower, to be removed from dataframe.
 
     :return: Dataframe storing only unique row entries in "column_string" where all columns with entries from
     "column_texts" are non-zero
@@ -310,6 +311,7 @@ def dataframe_select_suspension_insulator_sets(df, tow_string, set_string, set_f
 
     'Check to store only row entries that are loaded both from ahead and back spans'
     df["match"] = df.apply(lambda x: 1 if all([1 if x[y] != 0 else 0 for y in col_names]) else 0, axis=1)
+    df.loc[:, "match"] = df.apply(lambda x: 0 if x["set_no"] in ew_sets else x["match"], axis=1)
 
     'Perform second check, to identify attachment points with substantially lower loads, which are assumed as EW'
     tow_sets = {}
@@ -387,7 +389,7 @@ def dataframe_from_excel_object(excel_object, sheet, row, column=0):
         skiprows=row,
         sheet_name=sheet,
     )
-    df = dataframe_filter_only_above_nas(df, 0)
+    df = dataframe_filter_only_above_nas(df, column)
     df = dataframe_filter_only_columns_without_nas(df)
 
     return df
@@ -448,16 +450,19 @@ def dataframe_aggregate_by_specific_column(df, group_column):
     :rtype: pd.DataFrame
     '''
 
-    'Find '
+    'Find indexes of rows with duplicated entries'
     rows = np.array(df.index)
     index_lists = [list((rows == x).nonzero()[0]) for x in np.unique(rows)]
+    'Find indexes of first entry of each unique row entry and store in dataframe'
     rows = list(rows)
     indexes = [rows.index(x) for x in np.unique(rows)]
     df_new = df.iloc[indexes, :]
+    'Reset indexes (to integers starting from 0) such that indexes can be used directly '
+    'to look up from dataframe (index row)'
     df = df.reset_index()
     df_new = df_new.reset_index()
     columns = list(df.columns)
-
+    'Add duplicated information to "group_column" for each unique row entry'
     df_new.loc[:, group_column] = df_new.apply(lambda x: list(df.iloc[index_lists[x.name], columns.index(group_column)]), axis=1)
     df_new = df_new.set_index(columns[0])
 
@@ -667,8 +672,8 @@ def find_max_value_all_types(val1, val2):
 
     :return: Maximum value
     '''
+    ret_list = [val1, val2]
     if type(val1) == type(val2):
         return max(val1, val2)
     else:
-        ret_list = np.nan_to_num([val1, val2])
         return max([str(x) for x in ret_list])

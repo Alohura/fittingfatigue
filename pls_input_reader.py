@@ -11,7 +11,8 @@ time1 = time()
 
 
 def main():
-    # path_pls_input = r"C:\Users\AndreasLem\OneDrive - Groundline\Projects\NZ-6500 - Clevis fatigue load evaluations"
+    # path_pls_input = r"C:\temp\clevis"
+    # path_ca_input = r"C:\temp\clevis\input"
     path_pls_input = r"C:\Users\AndreasLem\Groundline\NZ-6500 Insulator Cold End Failure Investigation - Documents\03 Operations\04_Analyses\Load input"
     path_ca_input = r"C:\Users\AndreasLem\Groundline\NZ-6500 Insulator Cold End Failure Investigation - Documents\03 Operations\01_Inputs\01_Line Asset"
     input_file = "ClevisFatigue_Input.xlsx"
@@ -160,14 +161,19 @@ class TowerColdEndFittingFatigue:
         '''
         cls_obj = cls(path, path_ca, input_file, results_file)
         cls_obj._excel_input_read()
+
         'Read pickle or process OBIEE CA and set information dataframe'
+        dataframe_process = False
         if read_pickle_ca:
             if os.path.exists(os.path.join(cls_obj.path_ca, "pickle_ca.p")):
                 with open(os.path.join(cls_obj.path_ca, "pickle_ca.p"), "rb") as f:
                     [df_ca, df_set] = pickle.load(f)
             else:
-                df_ca, df_set = ReadCAAndSetInformation.setup(cls_obj)
+                dataframe_process = True
         else:
+            dataframe_process = True
+
+        if dataframe_process:
             df_ca, df_set = ReadCAAndSetInformation.setup(cls_obj)
             with open(os.path.join(cls_obj.path_ca, "pickle_ca.p"), "wb") as f:
                 pickle.dump([df_ca, df_set], f)
@@ -185,10 +191,10 @@ class TowerColdEndFittingFatigue:
 
         if dataframe_process:
             df = cls_obj._read_attachment_loads()
-            df = cls_obj._line_and_tower_to_set_name_map(df, df_set)
             with open(os.path.join(cls_obj.path_input, "pickle_df.p"), "wb") as f:
                 pickle.dump(df, f)
 
+        df = cls_obj._line_and_tower_to_set_name_map(df, df_set)
         df = cls_obj._ca_value_map_to_sn_detail(df, df_ca, ca_default=100.)
         df = cls_obj._calculate_fatigue_damage(df)
         cls_obj._write_to_excel(df, "line_id", ["damage"])
@@ -233,7 +239,7 @@ class TowerColdEndFittingFatigue:
 
         'Map set information from set dataframe'
         df["set_name"] = df.apply(
-            lambda x: ca_and_set_value_from_dict(x["line_id"] + "_" + x["structure_number"], set_dict, "set_name", []),
+            lambda x: ca_and_set_value_from_dict(x["line_id"].split("_")[0] + "_" + x["structure_number"], set_dict, "set_name", []),
             axis=1
         )
 
@@ -407,7 +413,7 @@ class TowerColdEndFittingFatigue:
 
             'Store only suspension towers and remove columns no longer needed'
             df = dataframe_select_suspension_insulator_sets(
-                df, "structure_number", "set_no", 3., ["ahead", "back"]
+                df, "structure_number", "set_no", 3., ["ahead", "back"], [7, 8]
             )
             df = dataframe_remove_columns(df, ["ahead", "back"])
 
@@ -475,10 +481,6 @@ class TowerColdEndFittingFatigue:
             item_max = item.loc[indx_list, :]
 
             df_list[i] = item_max
-            # if "df_return" not in locals():
-            #     df_return = item_max
-            # else:
-            #     df_return = pd.concat([df_return, item_max])
 
         return pd.concat(df_list), df_nominal
 
@@ -526,7 +528,7 @@ class TowerColdEndFittingFatigue:
         height_clevis = self.clevis_info["height"] * self.unit_conversion[self.general_info["unit"]]
         r_pin = self.swivel_info["d_pin"] * self.unit_conversion[self.general_info["unit"]] / 2.
         force_arm = self.general_info["force_arm"] * self.unit_conversion[self.general_info["unit"]]
-        fraction_to_section = (height_clevis + height_swivel) / force_arm
+        fraction_to_section = 1. - (height_clevis + height_swivel) / force_arm
         'Calculate friction moments from swivel / cleat interface (T1) and from swivel / pin reaction force couple (T2)'
         df["t1"] = df.apply(
             lambda x: friction_torsion_resistance_swivel_t1(my, x["transversal"], r_out, r_in),
@@ -628,6 +630,10 @@ class TowerColdEndFittingFatigue:
             for group, res in df.groupby(group_col):
                 if len(sort_cols) > 0:
                     res = res.sort_values(by=sort_cols, ascending=False)
+                res = res.sort_values(
+                    by=["critical_set", "damage", "line_id", "structure_number"],
+                    ascending=[False, False, True, True]
+                )
                 res.columns = res.columns.map(
                     lambda x: self.convert_names_all_back[x] if x in self.convert_names_all_back else x
                 )
@@ -800,7 +806,7 @@ class ReadCAAndSetInformation:
         row = header_indexes[header_labels.index(table_string)]
 
         'Create dataframe from Excel object and convert to code name format'
-        df = dataframe_from_excel_object(excel_object, sheet, row + 1 - offset, 0)
+        df = dataframe_from_excel_object(excel_object, sheet, row + 1 - offset, 1)
         df.columns = df.columns.map(
             lambda x: convert_names[x] if x in convert_names else x
         )
@@ -813,6 +819,7 @@ class ReadCAAndSetInformation:
 
         'Store only relevant columns and rows'
         df = df.loc[:, columns_return]
+
         if len(position) > 0:
             df = df.loc[df.loc[:, lookup_info["position_column"]] == position, :]
         else:
@@ -825,7 +832,7 @@ class ReadCAAndSetInformation:
         'Sort on line, structure and circuit information'
         df.loc[:, "line_id"] = line_name
         df.loc[:, "structure_number"] = df.apply(
-            lambda x: x[lookup_info["structure_number"]].lower().replace(x["line_id"], ""),
+            lambda x: x[lookup_info["structure_number"]].lower().replace(x["line_id"], ""),  # line_id, ""),  # x["line_id"], ""),
             axis=1
         )
 
@@ -848,11 +855,13 @@ class ReadCAAndSetInformation:
             df1, df2 = dfs[shapes.index(max(shapes))], dfs[shapes.index(min(shapes))]
             df1[lookup_info["val_1"]] = df1.loc[:, lookup_info["lookup"]]
             df1[lookup_info["val_2"]] = df2.loc[:, lookup_info["lookup"]]
+            df1.loc[:, lookup_info["val_2"]].fillna(0, inplace=True)
             df1[lookup_info["val_max"]] = df1.apply(
                 lambda x: find_max_value_all_types(x[lookup_info["val_1"]], x[lookup_info["val_2"]]),
                 axis=1
             )
             df1["circuit2"] = df2.loc[:, "circuit1"]
+            df1.loc[:, "circuit2"].fillna(0, inplace=True)
             df = df1
         else:
             df[lookup_info["val_1"]] = df.loc[:, lookup_info["lookup"]]

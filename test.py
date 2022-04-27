@@ -43,16 +43,6 @@ n_deltas, n_stresses = stress_histogram_en_1991_1_4(100, 2, 3)
 b = sum(n_deltas) / 1e9
 a = 1
 
-# sn_curve = {
-#     180: {'m1': 3, 'm2': 5, 's1': 180, 's2': 133, 's3': 73, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '100-95'},
-#     160: {'m1': 3, 'm2': 5, 's1': 160, 's2': 118, 's3': 65, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '95-75'},
-#     140: {'m1': 3, 'm2': 5, 's1': 140, 's2': 103, 's3': 57, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '75-55'},
-#     125: {'m1': 3, 'm2': 5, 's1': 125, 's2': 92, 's3': 51, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '55-35'},
-#     112: {'m1': 3, 'm2': 5, 's1': 112, 's2': 83, 's3': 45, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '35-15'},
-#     100: {'m1': 3, 'm2': 5, 's1': 100, 's2': 74, 's3': 40, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '15-0'}
-# }
-# sn_curve = {f"{x}": y for x, y in sn_curve.items()}
-
 list1 = [1, 2, 24]
 list2 = [1, 2, 23]
 
@@ -110,6 +100,8 @@ print(my_frame.iloc[[0, 2], [0, 1]])
 rows = np.array(my_frame.index)
 index_lists = [list((rows == x).nonzero()[0]) for x in np.unique(rows)]
 
-a=1
+print(np.nan_to_num([1, np.nan]))
+print(np.nan_to_num([1, None]))
+print(np.nan_to_num(float(None)), np.nan_to_num(float('nan')))
 
 
