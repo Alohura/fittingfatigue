@@ -418,6 +418,9 @@ class TowerColdEndFittingFatigue:
 
             'Remove rows with missing structure information'
             df = df.loc[df.loc[df.loc[:, "structure_number"].notna(), :].index]
+            df.loc[:, "structure_number"] = df.loc[:, "structure_number"].map(
+                lambda x: str(int(x)) if type(x) is float else str(x)
+            )
 
             'Store only suspension towers and remove columns no longer needed'
             df = dataframe_select_suspension_insulator_sets(
@@ -892,13 +895,17 @@ class ReadCAAndSetInformation:
         'If more than one circuit, store maximum ca_value for both circuits'
         circuits = df.loc[:, "circuit1"].unique()
 
+        # if line_name.upper() == "ISL-ISL-A":
+        #     a=1
+
         if len(circuits) > 1:
             df1 = df.groupby("circuit1").get_group(circuits[0]).set_index("line_structure")
             df2 = df.groupby("circuit1").get_group(circuits[1]).set_index("line_structure")
             shapes = [df1.shape[0], df2.shape[0]]
             dfs = [df1, df2]
             'Sort to use dataframe with most entries as basis'
-            df1, df2 = dfs[shapes.index(max(shapes))], dfs[shapes.index(min(shapes))]
+            indexes = [0, 1] if shapes[0] == shapes[1] else [shapes.index(max(shapes)), shapes.index(min(shapes))]
+            df1, df2 = dfs[indexes[0]], dfs[indexes[1]]
             missing_list, _ = lists_compare_contents(list(df2.index.unique()), list(df1.index.unique()))
             if len(missing_list) > 0:
                 df1 = pd.concat([df1, df2.loc[missing_list, :]])

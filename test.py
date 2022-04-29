@@ -114,3 +114,5 @@ a = 0 if len(a2) == len(set1) else 1
 
 b=' 851'
 print(len(b.strip()))
+
+print(str(4.0))
