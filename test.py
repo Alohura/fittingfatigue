@@ -100,8 +100,17 @@ print(my_frame.iloc[[0, 2], [0, 1]])
 rows = np.array(my_frame.index)
 index_lists = [list((rows == x).nonzero()[0]) for x in np.unique(rows)]
 
-print(np.nan_to_num([1, np.nan]))
-print(np.nan_to_num([1, None]))
-print(np.nan_to_num(float(None)), np.nan_to_num(float('nan')))
+lst2 = np.array(['851B', '7D'])
+lst1 = ['11D', '851B']
+# a1 = check_overlap_between_two_lists(lst1, lst2)
 
+set1, set2 = set(lst1), set(lst2)
+a2 = set1 - set2
+a3 = set2 - set1
 
+a = 0 if len(a2) == len(set1) else 1
+
+# 'npl-sfd-a'['11D', ' 851B']
+
+b=' 851'
+print(len(b.strip()))

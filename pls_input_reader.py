@@ -247,7 +247,8 @@ class TowerColdEndFittingFatigue:
         df["critical_set"] = df.apply(
             lambda x: check_overlap_between_two_lists(
                 x["set_name"],
-                self.line_file_name_info["insulator"][x["line_id"]]
+                self.line_file_name_info["insulator"][x["line_id"]],
+                x["line_id"]
             ),
             axis=1
         )
@@ -309,7 +310,7 @@ class TowerColdEndFittingFatigue:
         'Get input on file names and check if files are present'
         self.line_file_name_info = self._get_input_info("FileInput", 0)
         self.line_file_name_info["insulator"] = {
-            x: y.split(",") for x, y in self.line_file_name_info["insulator"].items()
+            x: y.replace(" ", "").split(",") for x, y in self.line_file_name_info["insulator"].items()
         }
 
         'Exit code if input list is not complete'
@@ -405,38 +406,54 @@ class TowerColdEndFittingFatigue:
                 continue
 
             'Read CSV file'
-            df = pd.read_csv(os.path.join(self.path_input, file_name), low_memory=False)
+            df = pd.read_csv(os.path.join(
+                self.path_input, file_name),
+                low_memory=False,
+                na_values=["nan", np.nan, "NaN", ""]
+            )
 
             'Convert names to code names, ref. dictionaries for converting names in __init__ module'
             df.columns = df.columns.map(lambda x: self.convert_names_pls[x] if x in self.convert_names_pls else x)
             df = df.loc[:, list(self.convert_names_pls.values())]
 
+            'Remove rows with missing structure information'
+            df = df.loc[df.loc[df.loc[:, "structure_number"].notna(), :].index]
+
             'Store only suspension towers and remove columns no longer needed'
             df = dataframe_select_suspension_insulator_sets(
-                df, "structure_number", "set_no", 3., ["ahead", "back"], [7, 8]
+                df, "structure_number", "set_no", 1., ["ahead", "back"], [7, 8]  # Set factor = 1 -> no ew filtering
             )
             df = dataframe_remove_columns(df, ["ahead", "back"])
 
             'Convert structure_number column, to keep consistent across lines, i.e. in case of "a", "b" extensions etc.'
             df.loc[:, "structure_number"] = df.loc[:, "structure_number"].map(str)
+            df.loc[:, "structure_number"] = df.loc[:, "structure_number"].str.lower()
 
             'Add line ID to uniquely identify each line'
             file_to_line_id = {y: x for x, y in self.line_file_name_info["file_name"].items()}
             df["line_id"] = file_to_line_id[file_name]
 
             'Process data and calculate moments'
-            df["resultant"] = df.apply(
-                lambda x: np.sqrt(x["longitudinal"] ** 2 + x["transversal"] ** 2 + x["vertical"] ** 2),
-                axis=1
+            # df["resultant"] = df.apply(
+            #     lambda x: np.sqrt(x["longitudinal"] ** 2 + x["transversal"] ** 2 + x["vertical"] ** 2),
+            #     axis=1
+            # )
+            df["resultant"] = np.sqrt(
+                df.loc[:, "longitudinal"] ** 2 + df.loc[:, "transversal"] ** 2 + df.loc[:, "vertical"] ** 2
             )
             df = self._add_swivel_torsion_moments(df)
 
-            'Convert to stress and stress ranges'
+            'Calculate stem stresses'
             df = self._add_stem_stresses(df)
-            df, df_nom = self._maximum_force_and_stress_range(df)
 
             'Store nominal values'
-            df = dataframe_add_nominal_values(df, df_nom)
+            df, df_nom_dict = dataframe_add_nominal_values(df, self.general_info["lc_rest"], "lc_description")
+
+            'Convert to stress ranges'
+            df = self._maximum_force_and_stress_range(df, df_nom_dict)
+
+            # 'Store nominal values'
+            # df = dataframe_add_nominal_values(df, df_nom)
 
             df_list[i] = df
             i += 1
@@ -445,7 +462,30 @@ class TowerColdEndFittingFatigue:
 
         return pd.concat(df_list)
 
-    def _maximum_force_and_stress_range(self, df, set_column="set_no", tow_column="structure_number"):
+    def _maximum_force_and_stress_range(self, df, df_nom_dict, tow_set_column="tow_set"):
+        '''
+        Function to find clevis stem stresses based on force, moment and SCF.
+
+        :param pd.DataFrame df: Dataframe containing all force information
+        :param dict df_nom_dict: Dictionary of entire dataframe, used to look up nominal values
+        :param str tow_set_column: Identifier for column containing tower and set numbers / IDs
+
+        :return: Dataframe with stem stresses
+        :rtype: pd.DataFrame
+        '''
+        'Calculate stress ranges'
+        df["stress_axial_range"] = abs(df.loc[:, "stress_axial"] - df.loc[:, tow_set_column].map(
+            lambda x: df_nom_dict[x]["stress_axial"]))
+        df["stress_bending_range"] = abs(df.loc[:, "stress_bending"] - df.loc[:, tow_set_column].map(
+            lambda x: df_nom_dict[x]["stress_bending"]))
+        df["stress_range"] = df.loc[:, "stress_axial_range"] + 2. * df.loc[:, "stress_bending_range"]
+
+        'Find maximum LC per "tow_set"'
+        df = df.sort_values("stress_range", ascending=False).drop_duplicates([tow_set_column])
+
+        return df
+
+    def _maximum_force_and_stress_range_old(self, df, set_column="set_no", tow_column="structure_number"):
         '''
         Function to find clevis stem stresses based on force, moment and SCF.
 
@@ -607,6 +647,10 @@ class TowerColdEndFittingFatigue:
                 ["resultant", "phase_no", True],
                 ["joint", "resultant", False],
                 ["line_id", "row", True],
+                ["f_long_nom", "tow_set", True],
+                ["f_vert_nom", "t1", False],
+                ["f_trans_nom", "t1", False],
+                ["f_long_nom", "t1", False],
             ]
         )
         'Store reorganized columns'
@@ -832,7 +876,7 @@ class ReadCAAndSetInformation:
         'Sort on line, structure and circuit information'
         df.loc[:, "line_id"] = line_name
         df.loc[:, "structure_number"] = df.apply(
-            lambda x: x[lookup_info["structure_number"]].lower().replace(x["line_id"], ""),  # line_id, ""),  # x["line_id"], ""),
+            lambda x: x[lookup_info["structure_number"]].lower().replace(x["line_id"], ""),
             axis=1
         )
 
@@ -847,12 +891,18 @@ class ReadCAAndSetInformation:
         'Lookup values from "lookup_info" and find maximum value'
         'If more than one circuit, store maximum ca_value for both circuits'
         circuits = df.loc[:, "circuit1"].unique()
+
         if len(circuits) > 1:
             df1 = df.groupby("circuit1").get_group(circuits[0]).set_index("line_structure")
             df2 = df.groupby("circuit1").get_group(circuits[1]).set_index("line_structure")
             shapes = [df1.shape[0], df2.shape[0]]
             dfs = [df1, df2]
+            'Sort to use dataframe with most entries as basis'
             df1, df2 = dfs[shapes.index(max(shapes))], dfs[shapes.index(min(shapes))]
+            missing_list, _ = lists_compare_contents(list(df2.index.unique()), list(df1.index.unique()))
+            if len(missing_list) > 0:
+                df1 = pd.concat([df1, df2.loc[missing_list, :]])
+                print(f"Different towers in the circuits for line {line_name}:", missing_list)
             df1[lookup_info["val_1"]] = df1.loc[:, lookup_info["lookup"]]
             df1[lookup_info["val_2"]] = df2.loc[:, lookup_info["lookup"]]
             df1.loc[:, lookup_info["val_2"]].fillna(0, inplace=True)
@@ -917,9 +967,9 @@ class ReadCAAndSetInformation:
                 if line_name not in line_info.keys():
                     line_info[line_name] = {}
                 if "ca" in file_type.lower():
-                    line_info[line_name].update({"ca_file": file_name})
+                    line_info[line_name].update({"ca_file": file_name.lower()})
                 else:
-                    line_info[line_name].update({"set_file": file_name})
+                    line_info[line_name].update({"set_file": file_name.lower()})
 
         self.file_name_info = line_info
 

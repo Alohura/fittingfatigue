@@ -314,25 +314,28 @@ def dataframe_select_suspension_insulator_sets(df, tow_string, set_string, set_f
     df.loc[:, "match"] = df.apply(lambda x: 0 if x["set_no"] in ew_sets else x["match"], axis=1)
 
     'Perform second check, to identify attachment points with substantially lower loads, which are assumed as EW'
-    tow_sets = {}
-    for tow_id, item in df.groupby([tow_string]):
-        set_sums = {}
-        'Find average resultant load per attachment point'
-        for set_id, item_set in item.groupby([set_string]):
-            set_sums[set_id] = item_set.apply(lambda x: sum([x[y] for y in col_names]), axis=1).mean()
-        'Find sets to remove, if their average is lower by more than "set_factor"'
-        remove_sets = list(
-            {
-                x: y for x, y in set_sums.items() if (np.average(list(set_sums.values())) / y) > set_factor
-            }.keys()
-        )
-        keep_sets = [x for x in item.loc[:, set_string].unique() if x not in remove_sets]
-        tow_sets[tow_id] = keep_sets
+    df["keep"] = 1
+    if set_factor > 1.:
+        tow_sets = {}
+        for tow_id, item in df.groupby([tow_string]):
+            set_sums = {}
+            'Find average resultant load per attachment point'
+            for set_id, item_set in item.groupby([set_string]):
+                set_sums[set_id] = item_set.apply(lambda x: sum([x[y] for y in col_names]), axis=1).mean()
+            'Find sets to remove, if their average is lower by more than "set_factor"'
+            remove_sets = list(
+                {
+                    x: y for x, y in set_sums.items() if (np.average(list(set_sums.values())) / y) > set_factor
+                }.keys()
+            )
+            keep_sets = [x for x in item.loc[:, set_string].unique() if x not in remove_sets]
+            tow_sets[tow_id] = keep_sets
 
-    df["keep"] = df.apply(
-        lambda x: 1 if (x[tow_string] in tow_sets.keys()) and (x[set_string] in tow_sets[x[tow_string]]) else 0,
-        axis=1
-    )
+        df["keep"] = df.apply(
+            lambda x: 1 if (x[tow_string] in tow_sets.keys()) and (x[set_string] in tow_sets[x[tow_string]]) else 0,
+            axis=1
+        )
+
     'Keep only towers and sets that match both checks, i.e. if both ahead / back loading and loads larger'
     'than a fraction of the average attachment point loading'
     df = df.loc[(df.loc[:, "match"] == 1) & (df.loc[:, "keep"] == 1), :]
@@ -469,7 +472,31 @@ def dataframe_aggregate_by_specific_column(df, group_column):
     return df_new
 
 
-def dataframe_add_nominal_values(df, df_nom, set_column="set_no", tow_column="structure_number"):
+def dataframe_add_nominal_values(df, lc_nom, col_search="lc_description", set_column="set_no", tow_column="structure_number"):
+    '''
+    Function to add loads for nominal load case for each entry.
+
+    :param pd.DataFrame df: Dataframe to be processed
+    :param pd.DataFrame lc_nom: Column in which to search for nominal load case
+    :param str set_column: Identifier for column containing set numbers / IDs
+    :param str tow_column: Identifier for column containing tower numbers / IDs
+
+    :return: Dataframe with all information necessary for processing fatigue damage
+    :rtype: pd.DataFrame
+    '''
+    df["tow_set"] = df.loc[:, "structure_number"] + "_" + df.loc[:, "set_no"].fillna(0).map(lambda x: str(int(x)))
+
+    df_nominal = df.loc[df.loc[:, col_search] == lc_nom, :]
+    df_nom_dict = df_nominal.set_index("tow_set").transpose().to_dict()
+
+    df["f_long_nom"] = df.loc[:, "tow_set"].map(lambda x: df_nom_dict[x]["longitudinal"])
+    df["f_trans_nom"] = df.loc[:, "tow_set"].map(lambda x: df_nom_dict[x]["transversal"])
+    df["f_vert_nom"] = df.loc[:, "tow_set"].map(lambda x: df_nom_dict[x]["vertical"])
+
+    return df, df_nom_dict
+
+
+def dataframe_add_nominal_values_old(df, df_nom, set_column="set_no", tow_column="structure_number"):
     '''
     Function to add loads for nominal load case for each entry.
 
@@ -542,8 +569,8 @@ def list_items_move(input_list, sorting_items):
     [item_to_move (str), item_to_replace (str), remove (bool)].
 
     :param list input_list: List to be reorganized
-    :param list sorting_items: List with entries to search for and move, with 3rd item deciding if replaced value shall be
-    stored or not
+    :param list sorting_items: List with entries to search for and move, with 3rd item deciding if replaced value shall
+    be stored or not
 
     :return: Reorganized list
     :rtype: list
@@ -591,7 +618,7 @@ def sn_curve_add_ca_list(sn_curves):
     '''
 
     for curve, sn in sn_curves.items():
-        ca_vals = [float(x) for x in sn["ca"].split("-")]
+        ca_vals = [float(x) for x in sn["ca"].replace(" ", "").split("-")]
         if sum(ca_vals) == 0:
             ca_vals = [-2., -1.]
         sn_curves[curve].update({"ca_list": ca_vals})
@@ -647,7 +674,7 @@ def remove_duplicates_from_list(input_list):
     return list(OrderedDict.fromkeys(input_list))
 
 
-def check_overlap_between_two_lists(lst1, lst2):
+def check_overlap_between_two_lists(lst1, lst2, line_id):
     '''
 
     :param list lst1:
