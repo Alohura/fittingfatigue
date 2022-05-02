@@ -84,8 +84,9 @@ class TowerColdEndFittingFatigue:
             "Stress [MPa]": "stress",
             "Stress - axial [MPa]": "stress_axial",
             "Stress - bending [MPa]": "stress_bending",
+            "Stress range [MPa] (Axial + Bending stress ranges)": "stress_range",
             "Stress range [MPa] (Axial + 2 x Bending stress ranges)": "stress_range",
-            "Stress range - axial [MPa]": "stress_axial_range",
+            # "Stress range - axial [MPa]": "stress_axial_range",
             "Stress range - bending [MPa]": "stress_bending_range",
             "Friction resistance moment - T1 [Nm]": "t1",
             "Friction resistance moment - T2 [Nm]": "t2",
@@ -437,10 +438,6 @@ class TowerColdEndFittingFatigue:
             df["line_id"] = file_to_line_id[file_name]
 
             'Process data and calculate moments'
-            # df["resultant"] = df.apply(
-            #     lambda x: np.sqrt(x["longitudinal"] ** 2 + x["transversal"] ** 2 + x["vertical"] ** 2),
-            #     axis=1
-            # )
             df["resultant"] = np.sqrt(
                 df.loc[:, "longitudinal"] ** 2 + df.loc[:, "transversal"] ** 2 + df.loc[:, "vertical"] ** 2
             )
@@ -454,9 +451,6 @@ class TowerColdEndFittingFatigue:
 
             'Convert to stress ranges'
             df = self._maximum_force_and_stress_range(df, df_nom_dict)
-
-            # 'Store nominal values'
-            # df = dataframe_add_nominal_values(df, df_nom)
 
             df_list[i] = df
             i += 1
