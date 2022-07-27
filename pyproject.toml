@@ -5,7 +5,7 @@ description = "Code for evaluating insulator attachment point loading, convertin
 authors = ["Mr. Lem"]
 
 [tool.poetry.dependencies]
-python = "3.9,<3.11"
+python = ">3.9,<3.11"
 pandas = "^1.4.1"
 openpyxl = "^3.0.9"
 scipy = "^1.8.0"

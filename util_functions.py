@@ -400,8 +400,6 @@ def dataframe_from_excel_object(excel_object, sheet, row, column=0):
 
 def fatigue_damage_from_histogram(stress_max, histogram, sn_curve):
     stresses = [stress_max * x / 100. for x in histogram[1]]
-    # n_capacity = [fatigue_cycle_constant_stress_range_nzs3404(stress, sn_curve) for stress in stresses]
-    # n_cycl = histogram[0]
     return sum([n / fatigue_cycle_constant_stress_range_nzs3404(stress, sn_curve) for n, stress in zip(histogram[0], stresses)])
 
 

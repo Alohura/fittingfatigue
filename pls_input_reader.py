@@ -111,6 +111,7 @@ class TowerColdEndFittingFatigue:
             'Strain Fwd Std Assy': 'strain_forward',
             'Strain Back Std Assy': 'strain_back',
             'Susp Std Assy': 'suspension',
+            'Insulator AttachType': 'insulator_type',
             'Susp Ins Type Desc': 'suspension_description',
             'Condition Assessment': 'ca',
             'Set Identifyer': 'set_name',
@@ -222,7 +223,7 @@ class TowerColdEndFittingFatigue:
 
     def _line_and_tower_to_set_name_map(self, df, df_set):
         '''
-        Function to map line and tower id's to to set names
+        Function to map line and tower id's to set names
 
         :param pd.DataFrame df: Dataframe to be processed
         :param pd.DataFrame df_set: Dataframe containing set names for a range of lines
@@ -461,7 +462,8 @@ class TowerColdEndFittingFatigue:
 
     def _maximum_force_and_stress_range(self, df, df_nom_dict, tow_set_column="tow_set"):
         '''
-        Function to find clevis stem stresses based on force, moment and SCF.
+        Function to find clevis stem stresses based on force, moment and SCF. Stores line_tower_set entry with
+        maximum stress range, i.e. worst load case.
 
         :param pd.DataFrame df: Dataframe containing all force information
         :param dict df_nom_dict: Dictionary of entire dataframe, used to look up nominal values
@@ -577,6 +579,7 @@ class TowerColdEndFittingFatigue:
             ),
             axis=1
         )
+        # df["t2"] = 0.
         df["t_friction"] = df.loc[:, "t1"] + df.loc[:, "t2"]
         df["m_section"] = df.apply(
             lambda x: friction_moment_at_critical_section_swivel(
@@ -717,17 +720,38 @@ class ReadCAAndSetInformation:
             False,
         )
 
-        'Read CA values'
+        'Read swivel information'
         columns_lookup = {
-            "structure_number": "device_position",
-            "circuit": "asset_location",
-            "position_column": "position_name",
-            "lookup": "measurement",  # Defining ca or set columns
-            "val_max": "ca_max",
-            "val_1": "ca_1",
-            "val_2": "ca_2",
-            "additional": ["year", "date", "comment"]
+            "structure_number": "device_position",  # 'Device Position'
+            "circuit": "circuit",  # 'Circuit'
+            "position_column": "insulator_type",  # Defining SWL, HBK or TBT  # 'Insulator AttachType'
+            "lookup": "insulator_type",  # Defining ca or set  # 'Susp Std Assy'
+            "val_max": "insulator",
+            "val_1": "insulator_1",
+            "val_2": "insulator_2",
+            "additional": []  # ''
         }
+        # df_swl = cls_obj._excel_read_ca_set_file_all(
+        #     "Lines - Asset Attributes",
+        #     "Asset",
+        #     -2,
+        #     "Towers",
+        #     "",
+        #     columns_lookup,
+        #     "set"
+        # )
+        #
+        # 'Read CA values'
+        # columns_lookup = {
+        #     "structure_number": "device_position",
+        #     "circuit": "asset_location",
+        #     "position_column": "position_name",
+        #     "lookup": "measurement",  # Defining ca or set columns
+        #     "val_max": "ca_max",
+        #     "val_1": "ca_1",
+        #     "val_2": "ca_2",
+        #     "additional": ["year", "date", "comment"]
+        # }
         df_ca = cls_obj._excel_read_ca_set_file_all(
             "Detailed Lines CA Data",
             "Asset",
@@ -844,14 +868,20 @@ class ReadCAAndSetInformation:
         header_indexes, header_labels = excel_sheet_find_input_rows_by_string(
             excel_object, sheet, 0, offset, header_search
         )
-        row = header_indexes[header_labels.index(table_string)]
+        if table_string in header_labels:
+            row = header_indexes[header_labels.index(table_string)]
+        else:
+            row = -1
 
         'Create dataframe from Excel object and convert to code name format'
-        df = dataframe_from_excel_object(excel_object, sheet, row + 1 - offset, 1)
-        df.columns = df.columns.map(
-            lambda x: convert_names[x] if x in convert_names else x
-        )
-        df.fillna(0)
+        if row == -1:
+            df = pd.DataFrame(columns=columns_return)
+        else:
+            df = dataframe_from_excel_object(excel_object, sheet, row + 1 - offset, 1)
+            df.columns = df.columns.map(
+                lambda x: convert_names[x] if x in convert_names else x
+            )
+            df.fillna(0)
 
         'Add columns to keep relevant information'
         for col in columns_return:
@@ -888,6 +918,11 @@ class ReadCAAndSetInformation:
         'Lookup values from "lookup_info" and find maximum value'
         'If more than one circuit, store maximum ca_value for both circuits'
         circuits = df.loc[:, "circuit1"].unique()
+
+        'Remove duplicates'
+        df["line_tow_circ"] = df.loc[:, "line_id"] + "_" + df.loc[:, "structure_number"] + "_" + df.loc[:, "circuit1"]
+        df = df.loc[~df.loc[:, "line_tow_circ"].duplicated(keep="last"), :]
+        df = df.drop(columns=["line_tow_circ"])
 
         # if line_name.upper() == "ISL-ISL-A":
         #     a=1
