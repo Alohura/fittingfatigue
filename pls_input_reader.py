@@ -401,6 +401,7 @@ class TowerColdEndFittingFatigue:
             0 for file_name in self.csv_objects if file_name in self.line_file_name_info["file_name"].values()
         ]
         i = 0
+        tower_count = 0
         for file_name in self.csv_objects:
             'Check if CSV file in input list'
             if file_name not in self.line_file_name_info["file_name"].values():
@@ -423,6 +424,9 @@ class TowerColdEndFittingFatigue:
             df.loc[:, "structure_number"] = df.loc[:, "structure_number"].map(
                 lambda x: str(int(x)) if type(x) is float else str(x)
             )
+
+            'Count towers processed'
+            tower_count += len(df.loc[:, "structure_number"].unique())
 
             'Store only suspension towers and remove columns no longer needed'
             df = dataframe_select_suspension_insulator_sets(
@@ -457,6 +461,8 @@ class TowerColdEndFittingFatigue:
             i += 1
 
             print(f"Time after csv read of {file_name}: {time() - time0}")
+
+        print(f"-----{tower_count} towers processed-----")
 
         return pd.concat(df_list)
 
