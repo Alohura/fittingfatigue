@@ -11,20 +11,21 @@ time1 = time()
 
 
 def main():
-    # path_pls_input = r"C:\temp\clevis"
-    # path_ca_input = r"C:\temp\clevis\input"
-    path_pls_input = r"C:\Users\AndreasLem\Groundline\NZ-6500 Insulator Cold End Failure Investigation - Documents\03 Operations\04_Analyses\Load input"
-    path_ca_input = r"C:\Users\AndreasLem\Groundline\NZ-6500 Insulator Cold End Failure Investigation - Documents\03 Operations\01_Inputs\01_Line Asset"
+    path_input = r"C:\Users\AndreasLem\Groundline\NZ-6529 - Ball clevis test and analysis support - Documents\03 Operations\Analysis"
+    path_inputs = {
+        "ca": "Asset input",
+        "loads": "Load input"
+    }
     input_file = "ClevisFatigue_Input.xlsx"
     results_file = "line_summary.xlsx"
-    time0 = time()
-    TowerColdEndFittingFatigue.fatigue_damage(path_pls_input, path_ca_input, input_file, results_file, True, False)
+    TowerColdEndFittingFatigue.fatigue_damage(path_input, path_inputs, input_file, results_file, True, False)
 
 
 class TowerColdEndFittingFatigue:
-    def __init__(self, path, path_ca, file_name, results_file):
-        self.path_input = path
-        self.path_ca = path_ca
+    def __init__(self, path_setup, path_inputs, file_name, results_file):
+        self.path_setup = path_setup
+        self.path_input = os.path.join(path_setup, path_inputs["loads"])
+        self.path_ca = os.path.join(path_setup, path_inputs["ca"])
         self.file_name = file_name
         self.results_file_name = results_file
         'Dictionaries to convert from naming in Excel sheet to format consistent with python code'
@@ -52,14 +53,19 @@ class TowerColdEndFittingFatigue:
         self.convert_names_general = {
             'Parameter': 'parameter',
             'Value': 'value',
+            'Swivel ID:': 'swivel_id',
+            'Swivel type:': 'swivel_type',
+            'Insulator sets:': 'insulator_sets',
             'Height [mm]:': 'height',
             'Width [mm]:': 'width',
+            'Bracket height [mm]:': 'height_bracket',
             'Outer diameter [mm]:': 'd_outer',
             'Inner diameter [mm]:': 'd_inner',
             'Pin diameter [mm]:': 'd_pin',
             'Stem diameter [mm]:': 'd_stem',
             'Transition radius [mm]:': 'r_notch',
             'Ball effective diameter [mm]:': 'd_ball',
+            'Ball clevis length [mm]:': 'l_clevis',
             'Friction coefficient [-]:': 'friction',
             'Force arm distance [mm]:': 'force_arm',
             'Unit:': 'unit',
@@ -86,7 +92,6 @@ class TowerColdEndFittingFatigue:
             "Stress - bending [MPa]": "stress_bending",
             "Stress range [MPa] (Axial + Bending stress ranges)": "stress_range",
             "Stress range [MPa] (Axial + 2 x Bending stress ranges)": "stress_range",
-            # "Stress range - axial [MPa]": "stress_axial_range",
             "Stress range - bending [MPa]": "stress_bending_range",
             "Friction resistance moment - T1 [Nm]": "t1",
             "Friction resistance moment - T2 [Nm]": "t2",
@@ -138,6 +143,9 @@ class TowerColdEndFittingFatigue:
         self.convert_names_all_back = {y: x for x, y in self.convert_names_all.items()}
         'Input variables'
         self.swivel_info = {}
+        self.hbk_info = {}
+        self.insulator_set_sw = {}
+        self.insulator_set_hbk = {}
         self.clevis_info = {}
         self.general_info = {}
         self.line_file_name_info = {}
@@ -148,20 +156,22 @@ class TowerColdEndFittingFatigue:
         self.csv_objects = self._init_csv_files()
 
     @classmethod
-    def fatigue_damage(cls, path, path_ca, input_file, results_file, read_pickle_ca=False, read_pickle=False):
+    def fatigue_damage(cls, path_setup, path_inputs, input_file, results_file, read_pickle_ca=False, read_pickle=False):
         '''
         Calculate fatigue damage of insulators from PLS-CADD structure attachment loading, input values from
         "input_file", condition assessment (CA) values from files in folder "path_ca" and store to "results_file"
 
-        :param str path: Path with PLS-CADD input and structure loading ".csv" files
-        :param str path_ca: Path to folder with OBIEE reports containing CA values and insulator set information
+        :param str path_setup: Path to root of project, to input Excel sheet
+        :param dict path_inputs: Paths to folders;
+        {"ca": OBIEE reports containing CA values and insulator set information,
+        "loads": PLS-CADD input and structure loading ".csv" files}
         :param str input_file: Excel input file manually filled out prior to analysis
         :param str results_file: Name of Excel file results are written to
         :param bool read_pickle_ca: Allows for reading of pickled Excel OBIIE input, as reading is quite time consuming
         :param bool read_pickle: Allows for reading of pickled results, as reading is quite time consuming
 
         '''
-        cls_obj = cls(path, path_ca, input_file, results_file)
+        cls_obj = cls(path_setup, path_inputs, input_file, results_file)
         cls_obj._excel_input_read()
 
         'Read pickle or process OBIEE CA and set information dataframe'
@@ -298,16 +308,20 @@ class TowerColdEndFittingFatigue:
         header_indexes, header_labels = excel_sheet_find_input_rows_by_string(self.excel_object, "GeneralInput", 0)
 
         'Get input for necessary for friction calculations'
-        self.swivel_info = self._get_input_info("GeneralInput", header_indexes[0] + 2)["value"]
-        self.clevis_info = self._get_input_info("GeneralInput", header_indexes[1] + 2)["value"]
-        self.general_info = self._get_input_info("GeneralInput", header_indexes[2] + 2)["value"]
+        self.swivel_info = self._get_input_info("GeneralInput", header_indexes[0] + 2, True)
+        self.hbk_info = self._get_input_info("GeneralInput", header_indexes[1] + 2, True)
+        self.clevis_info = self._get_input_info("GeneralInput", header_indexes[2] + 2)["value"]
+        self.general_info = self._get_input_info("GeneralInput", header_indexes[3] + 2)["value"]
         self.sn_info = self._get_input_info(
             "GeneralInput",
-            header_indexes[3] + 2,
+            header_indexes[4] + 2,
             True
         )
         self.sn_info = sn_curve_add_ca_list(self.sn_info)
         self.sn_info = {f"{x}": y for x, y in self.sn_info.items()}
+
+        'Convert swivel and hanger bracket (hbk) info to insulator set dictionaries, to enable fast lookup'
+        self._insulator_set_input_setup()
 
         'Get input on file names and check if files are present'
         self.line_file_name_info = self._get_input_info("FileInput", 0)
@@ -322,6 +336,22 @@ class TowerColdEndFittingFatigue:
             False
         )
         self.excel_object.close()
+
+    def _insulator_set_input_setup(self):
+        '''
+        Function to enable quick lookup of properties for each insulator set number when calculating bending stresses
+        '''
+        dict_key = "insulator"
+        'Swivel info'
+        for key, item in self.swivel_info.items():
+            for ins in item[dict_key].split(","):
+                if ins not in self.insulator_set_sw:
+                    self.insulator_set_sw[ins] = {x: y for x, y in item.items() if x != dict_key}
+        'Hanger bracket information'
+        for key, item in self.hbk_info.items():
+            for ins in item[dict_key].split(","):
+                if ins not in self.insulator_set_hbk:
+                    self.insulator_set_hbk[ins] = {x: y for x, y in item.items() if x != dict_key}
 
     def _read_attachment_loads(self):
         '''
@@ -338,7 +368,8 @@ class TowerColdEndFittingFatigue:
 
         return df
 
-    def _add_swing_angles(self, df):
+    @staticmethod
+    def _add_swing_angles(df):
         '''
         Function to calculate swing angles (longitudinal, transversal) based on attachment point loads
 
@@ -376,17 +407,49 @@ class TowerColdEndFittingFatigue:
         df = dataframe_filter_only_columns_without_nas(df)
 
         'Convert to coding names, i.e. without spaces and special signs. See __init__ for conversion dictionary'
+        'For rows'
         df.iloc[:, 0] = df.iloc[:, 0].map(
             lambda x: self.convert_names_general[x] if x in self.convert_names_general else x
         )
-
-        df.iloc[:, 0] = df.iloc[:, 0].map(lambda x: x.lower() if type(x) is str else x)
-        df = df.set_index(df.columns[0])
+        'For columns'
         df.columns = df.columns.map(
             lambda x: self.convert_names_general[x] if x in self.convert_names_general else x
         ).str.lower()
 
+        'Remove Notes column'
+        df = df.loc[:, [x for x in df.columns if x != "notes"]]
+
+        df.iloc[:, 0] = df.iloc[:, 0].map(lambda x: x.lower() if type(x) is str else x)
+        df = df.set_index(df.columns[0])
+
         return df.transpose().to_dict() if transpose else df.to_dict()
+
+    def _dataframe_from_csv(self, file_name):
+        '''
+        Function to read csv file and return as dataframe if file is present in read folder
+
+        :param str file_name: File to be processed
+
+        :return: Dataframe to be processed with attachment loads
+        :rtype: pd.DataFrame
+        '''
+        file_check = True
+        'Check if CSV file in input list'
+        if file_name not in self.line_file_name_info["file_name"].values():
+            print(f"File type '{file_name}' not in excel input sheet. Skipped.")
+            file_check = False
+
+        'Read CSV file'
+        if file_check:
+            df = pd.read_csv(os.path.join(
+                self.path_input, file_name),
+                low_memory=False,
+                na_values=["nan", np.nan, "NaN", ""]
+            )
+        else:
+            df = pd.DataFrame()
+
+        return file_check, df
 
     def _dataframe_setup(self):
         '''
@@ -403,17 +466,10 @@ class TowerColdEndFittingFatigue:
         i = 0
         tower_count = 0
         for file_name in self.csv_objects:
-            'Check if CSV file in input list'
-            if file_name not in self.line_file_name_info["file_name"].values():
-                print(f"File type '{file_name}' not in excel input sheet. Skipped.")
+            'Read csv file, process only if file is present'
+            file_check, df = self._dataframe_from_csv(file_name)
+            if not file_check:
                 continue
-
-            'Read CSV file'
-            df = pd.read_csv(os.path.join(
-                self.path_input, file_name),
-                low_memory=False,
-                na_values=["nan", np.nan, "NaN", ""]
-            )
 
             'Convert names to code names, ref. dictionaries for converting names in __init__ module'
             df.columns = df.columns.map(lambda x: self.convert_names_pls[x] if x in self.convert_names_pls else x)
@@ -432,27 +488,33 @@ class TowerColdEndFittingFatigue:
             df = dataframe_select_suspension_insulator_sets(
                 df, "structure_number", "set_no", 1., ["ahead", "back"], [7, 8]  # Set factor = 1 -> no ew filtering
             )
+            '...'
             df = dataframe_remove_columns(df, ["ahead", "back"])
 
             'Convert structure_number column, to keep consistent across lines, i.e. in case of "a", "b" extensions etc.'
             df.loc[:, "structure_number"] = df.loc[:, "structure_number"].map(str)
             df.loc[:, "structure_number"] = df.loc[:, "structure_number"].str.lower()
 
+            df["tow_set"] = df.loc[:, "structure_number"] + "_" + df.loc[:, "set_no"].fillna(0).map(
+                lambda x: str(int(x)))
+
             'Add line ID to uniquely identify each line'
             file_to_line_id = {y: x for x, y in self.line_file_name_info["file_name"].items()}
             df["line_id"] = file_to_line_id[file_name]
 
-            'Process data and calculate moments'
+            'Add load resultant'
             df["resultant"] = np.sqrt(
                 df.loc[:, "longitudinal"] ** 2 + df.loc[:, "transversal"] ** 2 + df.loc[:, "vertical"] ** 2
             )
+
+            'Store nominal values'
+            df, df_nom_dict = dataframe_add_nominal_values(df, self.general_info["lc_rest"], "lc_description")
+
+            'Calculate moments'
             df = self._add_swivel_torsion_moments(df)
 
             'Calculate stem stresses'
             df = self._add_stem_stresses(df)
-
-            'Store nominal values'
-            df, df_nom_dict = dataframe_add_nominal_values(df, self.general_info["lc_rest"], "lc_description")
 
             'Convert to stress ranges'
             df = self._maximum_force_and_stress_range(df, df_nom_dict)
@@ -607,10 +669,10 @@ class TowerColdEndFittingFatigue:
         :rtype pandas.ExcelFile ExcelObj
         '''
         try:
-            excel_obj = pd.ExcelFile(os.path.join(self.path_input, self.file_name))
+            excel_obj = pd.ExcelFile(os.path.join(self.path_setup, self.file_name))
         except PermissionError:
             print(
-                f"File '{os.path.join(self.path_input, self.file_name)}' could not be opened. "
+                f"File '{os.path.join(self.path_setup, self.file_name)}' could not be opened. "
                 f"See if it is already open in another process."
             )
             exit()
@@ -737,27 +799,6 @@ class ReadCAAndSetInformation:
             "val_2": "insulator_2",
             "additional": []  # ''
         }
-        # df_swl = cls_obj._excel_read_ca_set_file_all(
-        #     "Lines - Asset Attributes",
-        #     "Asset",
-        #     -2,
-        #     "Towers",
-        #     "",
-        #     columns_lookup,
-        #     "set"
-        # )
-        #
-        # 'Read CA values'
-        # columns_lookup = {
-        #     "structure_number": "device_position",
-        #     "circuit": "asset_location",
-        #     "position_column": "position_name",
-        #     "lookup": "measurement",  # Defining ca or set columns
-        #     "val_max": "ca_max",
-        #     "val_1": "ca_1",
-        #     "val_2": "ca_2",
-        #     "additional": ["year", "date", "comment"]
-        # }
         df_ca = cls_obj._excel_read_ca_set_file_all(
             "Detailed Lines CA Data",
             "Asset",

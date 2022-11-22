@@ -2,6 +2,8 @@ import collections
 import pickle
 
 import numpy as np
+import pandas as pd
+
 from util_functions import *
 from scipy.integrate import quadrature
 import numpy as np
@@ -140,3 +142,6 @@ def integral_function(theta, my):
 mys = [i / 10. for i in range(11)]
 print(mys)
 print("Integral: ", [quadrature(integral_function, np.arcsin(13. / 27.), np.arcsin(19. / 27.), args=(my))[0] for my in mys])
+
+anew = pd.DataFrame()
+b = 1

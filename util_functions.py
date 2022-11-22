@@ -470,19 +470,22 @@ def dataframe_aggregate_by_specific_column(df, group_column):
     return df_new
 
 
-def dataframe_add_nominal_values(df, lc_nom, col_search="lc_description", set_column="set_no", tow_column="structure_number"):
+def dataframe_add_nominal_values(
+        df, lc_nom, col_search="lc_description", set_column="set_no", tow_column="structure_number"
+):
     '''
     Function to add loads for nominal load case for each entry.
 
     :param pd.DataFrame df: Dataframe to be processed
     :param pd.DataFrame lc_nom: Column in which to search for nominal load case
+    :param str col_search:
     :param str set_column: Identifier for column containing set numbers / IDs
     :param str tow_column: Identifier for column containing tower numbers / IDs
 
     :return: Dataframe with all information necessary for processing fatigue damage
     :rtype: pd.DataFrame
     '''
-    df["tow_set"] = df.loc[:, "structure_number"] + "_" + df.loc[:, "set_no"].fillna(0).map(lambda x: str(int(x)))
+    # df["tow_set"] = df.loc[:, "structure_number"] + "_" + df.loc[:, "set_no"].fillna(0).map(lambda x: str(int(x)))
 
     df_nominal = df.loc[df.loc[:, col_search] == lc_nom, :]
     df_nom_dict = df_nominal.set_index("tow_set").transpose().to_dict()
