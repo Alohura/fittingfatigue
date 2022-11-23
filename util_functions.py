@@ -470,31 +470,27 @@ def dataframe_aggregate_by_specific_column(df, group_column):
     return df_new
 
 
-def dataframe_add_nominal_values(
-        df, lc_nom, col_search="lc_description", set_column="set_no", tow_column="structure_number"
-):
+def dataframe_add_nominal_values(df, lc_nom, col_search="lc_description", set_column="line_tow_set"):
     '''
     Function to add loads for nominal load case for each entry.
 
     :param pd.DataFrame df: Dataframe to be processed
     :param pd.DataFrame lc_nom: Column in which to search for nominal load case
     :param str col_search:
-    :param str set_column: Identifier for column containing set numbers / IDs
-    :param str tow_column: Identifier for column containing tower numbers / IDs
+    :param str set_column: Identifier for column containing tower set numbers / IDs for a line
 
-    :return: Dataframe with all information necessary for processing fatigue damage
-    :rtype: pd.DataFrame
+    :return: Dataframe with all information necessary for processing fatigue damage, and nominal dataframe
+    :rtype: tuple
     '''
-    # df["tow_set"] = df.loc[:, "structure_number"] + "_" + df.loc[:, "set_no"].fillna(0).map(lambda x: str(int(x)))
 
     df_nominal = df.loc[df.loc[:, col_search] == lc_nom, :]
-    df_nom_dict = df_nominal.set_index("tow_set").transpose().to_dict()
+    df_nom_dict = df_nominal.set_index(set_column).transpose().to_dict()
 
-    df["f_long_nom"] = df.loc[:, "tow_set"].map(lambda x: df_nom_dict[x]["longitudinal"])
-    df["f_trans_nom"] = df.loc[:, "tow_set"].map(lambda x: df_nom_dict[x]["transversal"])
-    df["f_vert_nom"] = df.loc[:, "tow_set"].map(lambda x: df_nom_dict[x]["vertical"])
+    df["f_long_nom"] = df.loc[:, set_column].map(lambda x: df_nom_dict[x]["longitudinal"])
+    df["f_trans_nom"] = df.loc[:, set_column].map(lambda x: df_nom_dict[x]["transversal"])
+    df["f_vert_nom"] = df.loc[:, set_column].map(lambda x: df_nom_dict[x]["vertical"])
 
-    return df, df_nom_dict
+    return df, df.loc[df.loc[:, col_search] == lc_nom, :]
 
 
 def dataframe_add_nominal_values_old(df, df_nom, set_column="set_no", tow_column="structure_number"):
@@ -705,3 +701,23 @@ def find_max_value_all_types(val1, val2):
         return max(val1, val2)
     else:
         return max([str(x) for x in ret_list])
+
+
+def dict_of_dicts_max_item(dct, item_key):
+    '''
+    Function to return dictionary item with largest value "item_key"
+
+    :param dict dct: Dictionary to be evaluate
+    :param str item_key: Item key to compare
+
+    :return: Item of dictionary of dictionaries
+    :rtype: dict
+    '''
+    max_val = -1.e99
+    store_item = {}
+    for key, item in dct.items():
+        if item[item_key] > max_val:
+            store_item = item
+            max_val = item[item_key]
+
+    return store_item
