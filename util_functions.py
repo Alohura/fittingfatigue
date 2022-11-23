@@ -97,7 +97,7 @@ def friction_moment_at_critical_section_swivel(f_x, force_arm, fraction_to_criti
     return m_applied if m_applied < m_friction else m_friction
 
 
-def stress_stem_roark_17(f_axial, m_bending, d_outer, d_inner, r_notch):
+def stress_stem_roark_17_old(f_axial, m_bending, d_outer, d_inner, r_notch):
     '''
     Function to convert force and bending actions to stress at a stem diameter transition
 
@@ -115,6 +115,31 @@ def stress_stem_roark_17(f_axial, m_bending, d_outer, d_inner, r_notch):
         stress_axial = stress_roark_17a(d_outer, d_inner, r_notch) * abs(f_axial)
     if abs(m_bending) > 0.:
         stress_bending = stress_roark_17b(d_outer, d_inner, r_notch) * abs(m_bending)
+
+    return stress_axial + stress_bending
+
+
+def stress_stem_roark_17(f_axial, m_bending, scf_a, scf_b, d_outer, d_inner, r_notch):
+    '''
+    Function to convert force and bending actions to stress at a stem diameter transition
+
+    :param float f_axial: Axial force
+    :param float m_bending: Bending moment
+    :param float scf_a: Axial stress concentration factor
+    :param float scf_b: Bending stress concentration factor
+    :param float d_outer: Stem maximum diameter
+    :param float d_inner: Stem minimum diameter
+    :param float r_notch: Notch radius at diameter transition
+
+    :return: Stress including SCF's from axial and bending actions
+    :rtype: float
+    '''
+    stress_axial, stress_bending = 0., 0.
+    h = (d_outer - d_inner) / 2.
+    if abs(f_axial) > 0.:
+        stress_axial = scf_a * abs(f_axial) * 4. / (np.pi * (d_outer - 2. * h) ** 2)
+    if abs(m_bending) > 0.:
+        stress_bending = scf_b * abs(m_bending) * 32. / (np.pi * (d_outer - 2. * h) ** 3)
 
     return stress_axial + stress_bending
 
@@ -464,7 +489,10 @@ def dataframe_aggregate_by_specific_column(df, group_column):
     df_new = df_new.reset_index()
     columns = list(df.columns)
     'Add duplicated information to "group_column" for each unique row entry'
-    df_new.loc[:, group_column] = df_new.apply(lambda x: list(df.iloc[index_lists[x.name], columns.index(group_column)]), axis=1)
+    df_new.loc[:, group_column] = df_new.apply(
+        lambda x: list(df.iloc[index_lists[x.name], columns.index(group_column)]),
+        axis=1
+    )
     df_new = df_new.set_index(columns[0])
 
     return df_new
@@ -671,7 +699,7 @@ def remove_duplicates_from_list(input_list):
     return list(OrderedDict.fromkeys(input_list))
 
 
-def check_overlap_between_two_lists(lst1, lst2, line_id):
+def check_overlap_between_two_lists(lst1, lst2):  # , line_id):
     '''
 
     :param list lst1:
@@ -720,4 +748,4 @@ def dict_of_dicts_max_item(dct, item_key):
             store_item = item
             max_val = item[item_key]
 
-    return store_item
+    return {"D.F.": store_item}

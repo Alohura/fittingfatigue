@@ -278,8 +278,7 @@ class TowerColdEndFittingFatigue:
         df["critical_set"] = df.apply(
             lambda x: check_overlap_between_two_lists(
                 x["set_name"],
-                self.line_file_name_info["insulator"][x["line_id"]],
-                x["line_id"]
+                self.line_file_name_info["insulator"][x["line_id"]]
             ),
             axis=1
         )
@@ -628,17 +627,19 @@ class TowerColdEndFittingFatigue:
         :return: Dataframe with stem stresses in MPa
         :rtype: pd.DataFrame
         '''
-        d_out = self.clevis_info["d_ball"] * self.unit_conversion[self.general_info["unit"]]
-        d_in = self.clevis_info["d_stem"] * self.unit_conversion[self.general_info["unit"]]
         r_notch = self.clevis_info["r_notch"] * self.unit_conversion[self.general_info["unit"]]
-        df["SCF_axial"] = scf_roark_17a(d_out, d_in, r_notch)
-        df["SCF_bending"] = scf_roark_17b(d_out, d_in, r_notch)
+        df["SCF_axial"] = df.apply(lambda x: scf_roark_17a(x["r_out"] * 2., x["r_in"] * 2., r_notch), axis=1)
+        df["SCF_bending"] = df.apply(lambda x: scf_roark_17a(x["r_out"] * 2., x["r_in"] * 2., r_notch), axis=1)
         df["stress_axial"] = df.apply(
-            lambda x: stress_stem_roark_17(x["resultant"], 0., d_out, d_in, r_notch) / 1.e6,
+            lambda x: stress_stem_roark_17(
+                x["resultant"], 0., x["SCF_axial"], 0., x["r_out"] * 2., x["d_in"] * 2., r_notch
+            ) / 1.e6,
             axis=1
         )
         df["stress_bending"] = df.apply(
-            lambda x: stress_stem_roark_17(0., x["m_section"], d_out, d_in, r_notch) / 1.e6,
+            lambda x: stress_stem_roark_17(
+                0., x["m_section"], 0., x["SCF_bending"], x["r_out"], x["r_in"], r_notch
+            ) / 1.e6,
             axis=1
         )
         df["stress"] = df.loc[:, "stress_axial"] + df.loc[:, "stress_bending"]
@@ -650,7 +651,7 @@ class TowerColdEndFittingFatigue:
         Function used to map swivel data onto results dataframe for each "set_no"
 
         :param int hbk: 1 if hanger bracket, 0 if not
-        :param str set_name: Set ID to find dictionary item
+        :param list set_name: Set ID to find dictionary item. May contain more set names in list.
         :param list dcts_default: List of default dictionaries [hbk, sw], used in case set "set_no" is not in dicts
 
         :return: Dictionary item
@@ -661,9 +662,21 @@ class TowerColdEndFittingFatigue:
             dct_default = dcts_default[0]
         else:
             dct_look_up = self.insulator_set_sw
-            dct_default = dcts_default[0]
+            dct_default = dcts_default[1]
 
-        return dct_look_up[set_name] if set_name in dct_look_up else dct_default
+        'Store set if in critical set list, otherwise store first entry in list'
+        if len(set_name) == 0:
+            set_name = list(dct_default.keys())[0]
+        else:
+            if check_overlap_between_two_lists(set_name, list(dct_look_up.keys())):
+                set_name = [x for x in set_name if x in dct_look_up][0]
+            else:
+                set_name = "D.F."
+
+        dct_look_up.update(dct_default)
+        # print(f"-----------{set_name}-----------")
+
+        return dct_look_up[set_name]
 
     def _add_swivel_torsion_moments(self, df):
         '''
@@ -677,65 +690,13 @@ class TowerColdEndFittingFatigue:
         'General input parameters to friction calculations'
         unit_conversion = self.unit_conversion[self.general_info["unit"]]
         my = self.general_info["friction"]
-        # force_arm = self.general_info["force_arm"] * unit_conversion
-        # height_clevis = self.clevis_info["height"] * unit_conversion
+        force_arm = self.general_info["force_arm"] * unit_conversion
         swivel_default = dict_of_dicts_max_item(self.swivel_info, "d_pin")
         hbk_default = dict_of_dicts_max_item(self.hbk_info, "d_pin")
         dcts_default = [hbk_default, swivel_default]
 
-        ''
-
-        # r_out = self.swivel_info["d_outer"] * unit_conversion / 2.
-        # r_in = self.swivel_info["d_inner"] * unit_conversion / 2.
-        # width = self.swivel_info["width"] * unit_conversion
-        # height_swivel = self.swivel_info["height"] * unit_conversion
-        # r_pin = self.swivel_info["d_pin"] * unit_conversion / 2.
-
         'Add columns for moment calculations'
-        df = self._dataframe_add_cols_for_moment_calcs(df, dcts_default, unit_conversion)
-        # 'Outer radius'
-        # df["r_out"] = df.apply(
-        #     lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["d_outer"] / 2.,
-        #     axis=1
-        # ) * unit_conversion
-        # 'Inner radius'
-        # df["r_in"] = df.apply(
-        #     lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["d_inner"] / 2.,
-        #     axis=1
-        # ) * unit_conversion
-        # 'Swivel width'
-        # df["width"] = df.apply(
-        #     lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["width"],
-        #     axis=1
-        # ) * unit_conversion
-        # 'Swivel height'
-        # df["height_swivel"] = df.apply(
-        #     lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["height"],
-        #     axis=1
-        # ) * unit_conversion
-        # 'Swivel pin diameter '
-        # df["r_pin"] = df.apply(
-        #     lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["d_pin"] / 2.,
-        #     axis=1
-        # ) * unit_conversion
-        # 'Clevis height'
-        # df["height_clevis"] = df.apply(
-        #     lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["l_socket"],
-        #     axis=1
-        # ) * unit_conversion
-        # 'Hanger bracket height'
-        # df["height_hbk"] = df.apply(
-        #     lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["height_bracket"],
-        #     axis=1
-        # ) * unit_conversion
-        # 'Total height to section'
-        # df["height_total"] = df.loc[:, "height_swivel"] + df.loc[:, "height_swivel"] + df.loc[:, "height_clevis"]
-        # 'Calculate moment fraction at critical clevis intersection'
-        # 'Force arm'
-        # df["force_arm"] = df.apply(
-        #     lambda x: force_arm if force_arm > (x["height_total"] + 50.) else (x["height_total"] + 50.)
-        # )
-        # df["m_fraction"] = df.apply(lambda x: 1. - x["height_total"] / x["force_arm"])
+        df = self._dataframe_add_cols_for_moment_calcs(df, dcts_default, unit_conversion, force_arm)
 
         'Calculate friction moments from swivel / cleat interface (T1) and from swivel / pin reaction force couple (T2)'
         df["t1"] = df.apply(
@@ -762,19 +723,23 @@ class TowerColdEndFittingFatigue:
 
         return df
 
-    def _dataframe_add_cols_for_moment_calcs(self, df, dcts_default, unit_conversion, default_dist=50.):
+    def _dataframe_add_cols_for_moment_calcs(
+            self, df, dcts_default, unit_conversion, force_arm, default_dist=(50. / 1000.)
+    ):
         '''
         Function to add columns to dataframe to enable torsion moment calculations
 
         :param pd.DataFrame df: Input dataframe
-        :param dict dcts_default: Default values to use in case set numbers are not defined in input Excel sheet
+        :param list dcts_default: Default values to use in case set numbers are not defined in input Excel sheet
         :param float unit_conversion: Factor to convert such that units are consistent
+        :param float force_arm:
         :param float default_dist: Minimum distance from critical ball clevis section to effective rotation centre
 
         :return: Processed dataframe
         :rtype: pd.DataFrame
         '''
         'Outer radius'
+        a = df.loc[:, "set_name"]
         df["r_out"] = df.apply(
             lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["d_outer"] / 2.,
             axis=1
@@ -801,7 +766,7 @@ class TowerColdEndFittingFatigue:
         ) * unit_conversion
         'Clevis height'
         df["height_clevis"] = df.apply(
-            lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["l_socket"],
+            lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["l_clevis"],
             axis=1
         ) * unit_conversion
         'Hanger bracket height'
@@ -813,12 +778,16 @@ class TowerColdEndFittingFatigue:
         df["height_total"] = df.loc[:, "height_swivel"] + df.loc[:, "height_swivel"] + df.loc[:, "height_clevis"]
         'Force arm'
         df["force_arm"] = df.apply(
-            lambda x: x["force_arm"] if x["force_arm"] > (x["height_total"] + default_dist)
-            else (x["height_total"] + default_dist)
+            lambda x: force_arm if force_arm > (x["height_total"] + default_dist)
+            else (x["height_total"] + default_dist),
+            axis=1
         )
 
         'Calculate moment fraction at critical clevis intersection'
-        df["m_fraction"] = df.apply(lambda x: 1. - x["height_total"] / x["force_arm"])
+        df["m_fraction"] = df.apply(
+            lambda x: 1. - x["height_total"] / x["force_arm"],
+            axis=1
+        )
 
         return df
 
@@ -975,7 +944,7 @@ class ReadCAAndSetInformation:
         columns_lookup = {
             "structure_number": "device_position",  # See description for "ca_lookup"
             "circuit": "circuit",  # See description for "ca_lookup"
-            "position_column": "suspension",  # See description for "ca_lookup"
+            "position_column": "",  # See description for "ca_lookup"
             "lookup": "suspension",  # See description for "ca_lookup"
             "val_max": "set_name",  # See description for "ca_lookup"
             "val_1": "set_1",  # See description for "ca_lookup"
@@ -1123,11 +1092,9 @@ class ReadCAAndSetInformation:
 
         'Store only relevant columns and rows'
         df = df.loc[:, columns_return]
-
+        df = df.loc[df.loc[:, lookup_info["lookup"]].notna(), :]
         if len(position) > 0:
             df = df.loc[df.loc[:, lookup_info["position_column"]] == position, :]
-        else:
-            df = df.loc[df.loc[:, lookup_info["position_column"]].notna(), :]
 
         'Check if dataframe is empty'
         if df.shape[0] == 0:
@@ -1156,9 +1123,6 @@ class ReadCAAndSetInformation:
         df["line_tow_circ"] = df.loc[:, "line_id"] + "_" + df.loc[:, "structure_number"] + "_" + df.loc[:, "circuit1"]
         df = df.loc[~df.loc[:, "line_tow_circ"].duplicated(keep="last"), :]
         df = df.drop(columns=["line_tow_circ"])
-
-        # if line_name.upper() == "ISL-ISL-A":
-        #     a=1
 
         if len(circuits) > 1:
             df1 = df.groupby("circuit1").get_group(circuits[0]).set_index("line_structure")
