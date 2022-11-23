@@ -210,6 +210,7 @@ class TowerColdEndFittingFatigue:
 
         print(f"Time to finish csv read: {time() - time0}----------")
         df = cls_obj._line_and_tower_to_set_name_map(df, df_set)
+        df_nominal = cls_obj._line_and_tower_to_set_name_map(df_nominal, df_set)
         print(f"Time to finish set mapping: {time() - time0}----------")
         df = cls_obj._ca_value_map_to_sn_detail(df, df_ca, ca_default=100.)
         print(f"Time to finish S-N mapping: {time() - time0}----------")
@@ -632,7 +633,7 @@ class TowerColdEndFittingFatigue:
         df["SCF_bending"] = df.apply(lambda x: scf_roark_17a(x["r_out"] * 2., x["r_in"] * 2., r_notch), axis=1)
         df["stress_axial"] = df.apply(
             lambda x: stress_stem_roark_17(
-                x["resultant"], 0., x["SCF_axial"], 0., x["r_out"] * 2., x["d_in"] * 2., r_notch
+                x["resultant"], 0., x["SCF_axial"], 0., x["r_out"] * 2., x["r_in"] * 2., r_notch
             ) / 1.e6,
             axis=1
         )
@@ -739,7 +740,6 @@ class TowerColdEndFittingFatigue:
         :rtype: pd.DataFrame
         '''
         'Outer radius'
-        a = df.loc[:, "set_name"]
         df["r_out"] = df.apply(
             lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["d_outer"] / 2.,
             axis=1
