@@ -155,4 +155,6 @@ columns = list_items_move(
               ["joint", "resultant", False],
        ]
 )
-print(columns)
+# print(columns)
+
+print(scf_roark_17b(40.2,20.35,1))

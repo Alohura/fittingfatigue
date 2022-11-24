@@ -119,7 +119,7 @@ def stress_stem_roark_17_old(f_axial, m_bending, d_outer, d_inner, r_notch):
     return stress_axial + stress_bending
 
 
-def stress_stem_roark_17(f_axial, m_bending, scf_a, scf_b, d_outer, d_inner, r_notch):
+def stress_stem_roark_17(f_axial, m_bending, scf_a, scf_b, d_outer, d_inner):
     '''
     Function to convert force and bending actions to stress at a stem diameter transition
 

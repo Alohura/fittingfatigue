@@ -631,17 +631,21 @@ class TowerColdEndFittingFatigue:
         :rtype: pd.DataFrame
         '''
         r_notch = self.clevis_info["r_notch"] * self.unit_conversion[self.general_info["unit"]]
-        df["SCF_axial"] = df.apply(lambda x: scf_roark_17a(x["r_out"] * 2., x["r_in"] * 2., r_notch), axis=1)
-        df["SCF_bending"] = df.apply(lambda x: scf_roark_17a(x["r_out"] * 2., x["r_in"] * 2., r_notch), axis=1)
+        d_stem = self.clevis_info["d_stem"] * self.unit_conversion[self.general_info["unit"]]
+        d_ball = self.clevis_info["d_ball"] * self.unit_conversion[self.general_info["unit"]]
+        # df["SCF_axial"] = df.apply(lambda x: scf_roark_17a(x["r_out"] * 2., x["r_in"] * 2., r_notch), axis=1)
+        # df["SCF_bending"] = df.apply(lambda x: scf_roark_17b(x["r_out"] * 2., x["r_in"] * 2., r_notch), axis=1)
+        df["SCF_axial"] = scf_roark_17a(d_ball, d_stem, r_notch)
+        df["SCF_bending"] = scf_roark_17b(d_ball, d_stem, r_notch)
         df["stress_axial"] = df.apply(
             lambda x: stress_stem_roark_17(
-                x["resultant"], 0., x["SCF_axial"], 0., x["r_out"] * 2., x["r_in"] * 2., r_notch
+                x["resultant"], 0., x["SCF_axial"], 0., d_ball, d_stem
             ) / 1.e6,
             axis=1
         )
         df["stress_bending"] = df.apply(
             lambda x: stress_stem_roark_17(
-                0., x["m_section"], 0., x["SCF_bending"], x["r_out"], x["r_in"], r_notch
+                0., x["m_section"], 0., x["SCF_bending"], d_ball, d_stem
             ) / 1.e6,
             axis=1
         )
@@ -777,7 +781,7 @@ class TowerColdEndFittingFatigue:
             axis=1
         ) * unit_conversion
         'Total height to section'
-        df["height_total"] = df.loc[:, "height_swivel"] + df.loc[:, "height_swivel"] + df.loc[:, "height_clevis"]
+        df["height_total"] = df.loc[:, "height_swivel"] + df.loc[:, "height_hbk"] + df.loc[:, "height_clevis"]
         'Force arm'
         df["force_arm"] = df.apply(
             lambda x: force_arm if force_arm > (x["height_total"] + default_dist)
