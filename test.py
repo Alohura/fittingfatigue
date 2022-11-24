@@ -38,7 +38,7 @@ r_notch = 3.5 / 1000.
 f_axial = 100000.
 m_bending = 300.
 
-stress = stress_stem_roark_17(f_axial, m_bending, d_od, d_id, r_notch)
+# stress = stress_stem_roark_17(f_axial, m_bending, d_od, d_id, r_notch)
 scf_a = scf_roark_17a(d_od, d_id, r_notch)
 scf_b = scf_roark_17b(d_od, d_id, r_notch)
 print("SCFs [Axial, bending]:", [scf_a, scf_b])
@@ -54,29 +54,7 @@ list2 = [1, 2, 23]
 return_list = [[x, list2[list1.index(x)]] for x in list1 if x not in list2]
 print(return_list)
 
-columns = [
-       'row', 'structure_number', 'lc', 'wc',
-       'lc_description', 'set_no', 'phase_no', 'joint', 'vertical',
-       'transversal', 'longitudinal', 'line_id', 'resultant', 't1', 't2',
-       't_friction', 'm_section', 'SCF_axial', 'SCF_bending', 'stress_axial',
-       'stress_bending', 'stress', 'stress_axial_range',
-       'stress_bending_range', 'stress_range', 'f_long_nom', 'f_trans_nom',
-       'f_vert_nom', 'swing_angle_trans', 'swing_angle_trans_orig',
-       'swing_angle_trans_range', 'swing_angle_long', 'swing_angle_long_orig',
-       'swing_angle_long_range', 'sn_curve', 'damage'
-]
 
-
-columns = list_items_move(
-       columns,
-       [
-              ["line_id", "structure_number", False],
-              ["set_no", "lc", False],
-              ["resultant", "phase_no", True],
-              ["joint", "resultant", False],
-       ]
-)
-print(columns)
 
 my_dict = {'180': {'m1': 3, 'm2': 5, 's1': 180, 's2': 133, 's3': 73, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '95-100', 'ca_list': [95.0, 100.0]}, '160': {'m1': 3, 'm2': 5, 's1': 160, 's2': 118, 's3': 65, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '75-95', 'ca_list': [75.0, 95.0]}, '140': {'m1': 3, 'm2': 5, 's1': 140, 's2': 103, 's3': 57, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '55-75', 'ca_list': [55.0, 75.0]}, '125': {'m1': 3, 'm2': 5, 's1': 125, 's2': 92, 's3': 51, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '35-55', 'ca_list': [35.0, 55.0]}, '112': {'m1': 3, 'm2': 5, 's1': 112, 's2': 83, 's3': 45, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '15-35', 'ca_list': [15.0, 35.0]}, '100': {'m1': 3, 'm2': 5, 's1': 100, 's2': 74, 's3': 40, 'n_s1': 2000000, 'n_cut_off': 100000000, 'ca': '0-15', 'ca_list': [0.0, 15.0]}}
 print(sn_from_ca_values(16., my_dict))
@@ -143,7 +121,38 @@ mys = [i / 10. for i in range(11)]
 print(mys)
 print("Integral: ", [quadrature(integral_function, np.arcsin(13. / 27.), np.arcsin(19. / 27.), args=(my))[0] for my in mys])
 
-a = {"a": 1}
-b = {"b": 2}
-a.update(b)
-print("**********************", a)
+lst = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l']
+org_lst = [
+       ['j', 'b', False],
+       ['l', 'a', True],
+       ['a', 'l', False],
+       ['b','j',False]
+]
+
+new_lst = list_items_move(lst, org_lst)
+print(lst)
+print(new_lst)
+
+columns = [
+       'row', 'structure_number', 'lc', 'wc',
+       'lc_description', 'set_no', 'phase_no', 'joint', 'vertical',
+       'transversal', 'longitudinal', 'line_id', 'resultant', 't1', 't2',
+       't_friction', 'm_section', 'SCF_axial', 'SCF_bending', 'stress_axial',
+       'stress_bending', 'stress', 'stress_axial_range',
+       'stress_bending_range', 'stress_range', 'f_long_nom', 'f_trans_nom',
+       'f_vert_nom', 'swing_angle_trans', 'swing_angle_trans_orig',
+       'swing_angle_trans_range', 'swing_angle_long', 'swing_angle_long_orig',
+       'swing_angle_long_range', 'sn_curve', 'damage'
+]
+
+
+columns = list_items_move(
+       columns,
+       [
+              ["line_id", "structure_number", False],
+              ["set_no", "lc", False],
+              ["resultant", "phase_no", True],
+              ["joint", "resultant", False],
+       ]
+)
+print(columns)

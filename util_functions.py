@@ -600,13 +600,37 @@ def list_items_move(input_list, sorting_items):
     :return: Reorganized list
     :rtype: list
     '''
-    for item_from, item_to, item_remove in sorting_items:
-        index_from, index_new = input_list.index(item_from), input_list.index(item_to)
-        item_to = [] if item_remove else [input_list[index_new]]
-        input_list = input_list[:index_new] + [input_list[index_from]] + item_to \
-                     + input_list[index_new + 1:index_from] + input_list[index_from + 1:]
+    list_edit = input_list.copy()
+    for item_from, item_to, item_replace in sorting_items:
+        # index_from, index_to = input_list.index(item_from), input_list.index(item_to)
 
-    return input_list
+        item_to_fill, item_from_fill = [], [item_from]
+        index_to = list_edit.index(item_to)
+        index_from = list_edit.index(item_from)
+
+        if item_replace:
+            list_edit[index_to] = item_from
+            list_edit[index_from] = item_to
+        else:
+            list_edit = list_edit[:index_to] + [item_from] + list_edit[index_to:]
+            if index_from > index_to:
+                list_edit = list_edit[:index_from+1] + list_edit[index_from+2:]
+            else:
+                list_edit = list_edit[:index_from] + list_edit[index_from + 1:]
+
+        # a=1
+        # if item_replace:
+        #     list_edit[index_to]
+        #     item_to_fill = [item_to]
+        #     list_edit.pop(index_to)
+        # list_edit.pop(index_from)
+        # list_edit = list_edit[:index_to] + item_from_fill + list_edit[index_to:]
+        #
+        # # index_from = list_edit.index(item_from)
+        # a = list_edit.pop(index_from+1)
+        # list_edit = list_edit[:index_from] + item_to_fill + list_edit[index_from+1:]
+
+    return list_edit
 
 
 def convert_names(x, convert):

@@ -55,7 +55,6 @@ class TowerColdEndFittingFatigue:
             'Value': 'value',
             'Swivel ID:': 'swivel_id',
             'Swivel type:': 'swivel_type',
-            # 'Insulator sets:': 'insulator_sets',
             'Height [mm]:': 'height',
             'Width [mm]:': 'width',
             'Bracket height [mm]:': 'height_bracket',
@@ -71,6 +70,7 @@ class TowerColdEndFittingFatigue:
             'Unit:': 'unit',
             'Load case at rest:': 'lc_rest',
             'Line name:': 'line_id',
+            'Unique identifier [line_tow_set]:': 'line_tow_set',
             'File name:': 'file_name',
             'Insulator sets:': 'insulator'
         }
@@ -92,11 +92,14 @@ class TowerColdEndFittingFatigue:
             "Stress - bending [MPa]": "stress_bending",
             "Stress range [MPa] (Axial + Bending stress ranges)": "stress_range",
             "Stress range [MPa] (Axial + 2 x Bending stress ranges)": "stress_range",
+            "Stress range - axial [MPa]": "stress_axial_range",
             "Stress range - bending [MPa]": "stress_bending_range",
             "Friction resistance moment - T1 [Nm]": "t1",
             "Friction resistance moment - T2 [Nm]": "t2",
             "Total friction resistance moment [Nm]": "t_friction",
             "Moment at critical stem section [Nm]": "m_section",
+            "Moment fraction at stem section [-]:": "m_fraction",
+            "Hanger bracket check - 1 if bracket, 0 if not": "hbk",
             "SCF axial": "SCF_axial",
             "SCF bending": "SCF_bending"
         }
@@ -116,7 +119,6 @@ class TowerColdEndFittingFatigue:
             'Strain Fwd Std Assy': 'strain_forward',
             'Strain Back Std Assy': 'strain_back',
             'Susp Std Assy': 'suspension',
-            # 'Insulator AttachType': 'insulator_type',
             'Insulator AttachType': 'swivel_hbk',
             'Susp Ins Type Desc': 'suspension_description',
             'Condition Assessment': 'ca',
@@ -849,10 +851,29 @@ class TowerColdEndFittingFatigue:
                 ["f_vert_nom", "t1", False],
                 ["f_trans_nom", "t1", False],
                 ["f_long_nom", "t1", False],
+                ["critical_set", "damage", False],
+                ["line_tow_set", "line_id", False]
             ]
         )
+
         'Store reorganized columns'
         df = df.loc[:, columns]
+
+        'Delete some columns'
+        df = dataframe_remove_columns(
+            df,
+            [
+                "r_out",
+                "r_in",
+                "width",
+                "r_pin",
+                "height_swivel",
+                "height_clevis",
+                "height_hbk",
+                "height_total",
+                "row"
+            ]
+        )
 
         with pd.ExcelWriter(file_name) as writer:
             'Store summary sheet'
