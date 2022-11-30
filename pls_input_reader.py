@@ -13,7 +13,7 @@ time1 = time()
 def main():
     path_input = r"C:\Users\AndreasLem\Groundline\NZ-6529 - Ball clevis test and analysis support - Documents\03 Operations\Analysis"
     path_inputs = {
-        "ca": "Asset input - test",
+        "ca": "Asset input",
         "loads": "Load input"
     }
     input_file = "ClevisFatigue_Input.xlsx"
@@ -65,8 +65,13 @@ class TowerColdEndFittingFatigue:
             'Transition radius [mm]:': 'r_notch',
             'Ball effective diameter [mm]:': 'd_ball',
             'Ball clevis length [mm]:': 'l_clevis',
+            'Rolling angle factor [-]:': 'rolling_factor',
+            'Power factor [-]:': 'power_factor',
             'Friction coefficient [-]:': 'friction',
+            'Force arm minimum distance [mm]:': 'force_arm_min',
             'Force arm distance [mm]:': 'force_arm',
+            'Insulator length [mm]:': 'length_insulator',
+            'Elastic modulus - steel [MPa]:': 'e_modulus',
             'Unit:': 'unit',
             'Load case at rest:': 'lc_rest',
             'Line name:': 'line_id',
@@ -79,10 +84,10 @@ class TowerColdEndFittingFatigue:
             "SN Curve (NZS 3404)": "sn_curve",
             "Transversal swing angle [deg]": "swing_angle_trans",
             "Transversal swing angle - at rest [deg]": "swing_angle_trans_orig",
-            " Change in transversal swing angle [deg]": "swing_angle_trans_range",
+            "Change in transversal swing angle [deg]": "swing_angle_trans_range",  #
             "Longitudinal swing angle [deg]": "swing_angle_long",
             "Longitudinal swing angle - at rest [deg]": "swing_angle_long_orig",
-            " Change in longitudinal swing angle [deg]": "swing_angle_long_range",
+            "Change in longitudinal swing angle [deg]": "swing_angle_long_range",  #
             "Resultant force [N]": "resultant",
             "Nominal EDS Longitudinal load [N]": "f_long_nom",
             "Nominal EDS Transversal load [N]": "f_trans_nom",
@@ -101,7 +106,9 @@ class TowerColdEndFittingFatigue:
             "Moment fraction at stem section [-]:": "m_fraction",
             "Hanger bracket check - 1 if bracket, 0 if not": "hbk",
             "SCF axial": "SCF_axial",
-            "SCF bending": "SCF_bending"
+            "SCF bending": "SCF_bending",
+            "Angle of swivel / pin contact point [deg]:": "rolling_angle_swivel",
+            "Maximum angle of swivel / pin contact point [deg]:": "rolling_angle_swivel_max",
         }
         self.convert_names_ca_set = {
             'Asset': 'asset',
@@ -193,7 +200,7 @@ class TowerColdEndFittingFatigue:
             with open(os.path.join(cls_obj.path_ca, "pickle_ca.p"), "wb") as f:
                 pickle.dump([df_ca, df_set], f)
         print(f"Time to finish OBIEE read: {time() - time0}----------")
-
+        # exit()
         'Read pickle or process main dataframe'
         dataframe_process = False
         if read_pickle:
@@ -685,7 +692,7 @@ class TowerColdEndFittingFatigue:
 
         return dct_look_up[set_name]
 
-    def _add_swivel_torsion_moments(self, df):
+    def _add_swivel_torsion_moments_old(self, df):
         '''
         Function to find swivel torsion resistance moments based on applied force angle
 
@@ -697,7 +704,7 @@ class TowerColdEndFittingFatigue:
         'General input parameters to friction calculations'
         unit_conversion = self.unit_conversion[self.general_info["unit"]]
         my = self.general_info["friction"]
-        force_arm = self.general_info["force_arm"] * unit_conversion
+        force_arm = self.general_info["force_arm_min"] * unit_conversion
         swivel_default = dict_of_dicts_max_item(self.swivel_info, "d_pin")
         hbk_default = dict_of_dicts_max_item(self.hbk_info, "d_pin")
         dcts_default = [hbk_default, swivel_default]
@@ -730,8 +737,53 @@ class TowerColdEndFittingFatigue:
 
         return df
 
+    def _add_swivel_torsion_moments(self, df):
+        '''
+        Function to find swivel torsion resistance moments based on applied force angle
+
+        :param pd.DataFrame df: Dataframe containing all force information
+
+        :return: Dataframe with torsion resistance moments
+        :rtype: pd.DataFrame
+        '''
+        'General input parameters to friction calculations'
+        unit_conversion = self.unit_conversion[self.general_info["unit"]]
+        my = self.general_info["friction"]
+        force_arm_min_dist = self.general_info["force_arm_min"] * unit_conversion
+        swivel_default = dict_of_dicts_max_item(self.swivel_info, "d_pin")
+        hbk_default = dict_of_dicts_max_item(self.hbk_info, "d_pin")
+        dcts_default = [hbk_default, swivel_default]
+
+        'Add columns for moment calculations'
+        df = self._dataframe_add_cols_for_moment_calcs(df, dcts_default, unit_conversion, force_arm_min_dist)
+
+        'Calculate friction moments from swivel / cleat interface (T1) and from swivel / pin reaction force couple (T2)'
+        df["t1"] = df.apply(
+            lambda x: friction_torsion_resistance_swivel_t1(my, x["transversal"], x["r_out"], x["r_in"]),
+            axis=1
+        )
+        df["t2"] = df.apply(
+            lambda x: friction_torsion_resistance_swivel_t2(
+                my, x["transversal"], x["vertical"], x["width"], x["height_swivel"], x["r_pin"]
+            ),
+            axis=1
+        )
+
+        df["t_friction"] = df.loc[:, "t1"] + df.loc[:, "t2"]
+        df["m_section"] = df.apply(
+            lambda x: friction_moment_at_critical_section_swivel(
+                x["longitudinal"],
+                x["force_arm"],
+                x["m_fraction"],
+                x["t_friction"]
+            ),
+            axis=1
+        )
+
+        return df
+
     def _dataframe_add_cols_for_moment_calcs(
-            self, df, dcts_default, unit_conversion, force_arm, default_dist=(50. / 1000.)
+            self, df, dcts_default, unit_conversion, default_dist=(50. / 1000.)
     ):
         '''
         Function to add columns to dataframe to enable torsion moment calculations
@@ -739,12 +791,12 @@ class TowerColdEndFittingFatigue:
         :param pd.DataFrame df: Input dataframe
         :param list dcts_default: Default values to use in case set numbers are not defined in input Excel sheet
         :param float unit_conversion: Factor to convert such that units are consistent
-        :param float force_arm:
         :param float default_dist: Minimum distance from critical ball clevis section to effective rotation centre
 
         :return: Processed dataframe
         :rtype: pd.DataFrame
         '''
+        '---Swivel dimensions---'
         'Outer radius'
         df["r_out"] = df.apply(
             lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["d_outer"] / 2.,
@@ -770,6 +822,8 @@ class TowerColdEndFittingFatigue:
             lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["d_pin"] / 2.,
             axis=1
         ) * unit_conversion
+
+        '---Distance to ball socket---'
         'Clevis height'
         df["height_clevis"] = df.apply(
             lambda x: self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["l_clevis"],
@@ -782,10 +836,39 @@ class TowerColdEndFittingFatigue:
         ) * unit_conversion
         'Total height to section'
         df["height_total"] = df.loc[:, "height_swivel"] + df.loc[:, "height_hbk"] + df.loc[:, "height_clevis"]
+
+        '---Rotation angles---'
         'Force arm'
+        df["rolling_angle_swivel"] = df.apply(
+            lambda x: swivel_rotation_angle(
+                x["swing_angle_long_range"], x["r_pin"] * 2., x["r_in"] * 2., self.general_info["rolling_factor"]),
+            axis=1
+        )
+        df["rolling_angle_swivel_max"] = df.apply(
+            lambda x: swivel_rotation_angle_max(
+                self.general_info["friction"], x["r_pin"] * 2., x["r_in"] * 2., self.general_info["rolling_factor"]),
+            axis=1
+        )
+
+        'Force arm'
+        # df["force_arm"] = df.apply(
+        #     lambda x: force_arm if force_arm > (x["height_total"] + default_dist)
+        #     else (x["height_total"] + default_dist),
+        #     axis=1
+        # )
+        'Bending stiffness of insulator, assume ball clevis stem is representative for insulator'
+        EI = bending_stiffness_cylinder(
+            self.general_info["e_modulus"], self.clevis_info["d_stem"]
+        ) * unit_conversion ** 2
         df["force_arm"] = df.apply(
-            lambda x: force_arm if force_arm > (x["height_total"] + default_dist)
-            else (x["height_total"] + default_dist),
+            lambda x: insulator_to_cantilever_beam_length(
+                x["swing_angle_long_range"],
+                self.general_info["length_insulator"] * unit_conversion * np.cos(np.radians(x["swing_angle_trans"])),  # Vertical length of insulator
+                x["height_total"] + default_dist,
+                EI,
+                np.sqrt(x["vertical"] ** 2 + x["longitudinal"] ** 2),  # Resultant in longitudinal / vertical plane
+                self.general_info["power_factor"]
+            ),
             axis=1
         )
 

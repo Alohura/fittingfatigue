@@ -773,3 +773,80 @@ def dict_of_dicts_max_item(dct, item_key):
             max_val = item[item_key]
 
     return {"D.F.": store_item}
+
+
+def swivel_rotation_angle(angle, d_pin, d_hole, sliding_factor):
+    '''
+    Function to use pin and hole geometry together with applied load angle to calculate how the point of contact
+    changes between the two cylinders. The change of contact is represented by an angle, measured about the centre
+    of rotation of the outer cylinder.
+
+    :param float angle: Load angle
+    :param float d_pin: Pin diameter, i.e. inner cylinder
+    :param float d_hole: Hole diameter, i.e. outer cylinder
+    :param float sliding_factor: Factor to account for inner cylinder not rolling perfectly inside outer cylinder, i.e.
+    it accounts for some sliding below the friction limit.
+
+    :return: Angle to new contact point between the two cylinders
+    :rtype: float
+    '''
+    'Factor to account for how contact point moves as a function of inner cylinder rotation'
+    rolling_multiplier = d_pin / (2. * (d_hole - d_pin))
+
+    return rolling_multiplier * np.abs(angle) / sliding_factor
+
+
+def swivel_rotation_angle_max(friction, d_pin, d_hole, sliding_factor):
+    '''
+    Function to calculate maximum rotation of one cylinder inside another before the inner cylinder starts to slide.
+
+    :param float friction: Friction factor
+    :param float d_pin: Pin diameter, i.e. inner cylinder
+    :param float d_hole: Hole diameter, i.e. outer cylinder
+    :param float sliding_factor: Factor to account for inner cylinder not rolling perfectly inside outer cylinder, i.e.
+    it accounts for some sliding below the friction limit.
+
+    :return: Angle at which inner cylinder overcomes friction and starts to slide inside the other cylinder.
+    :rtype: float
+    '''
+    'Factor to account for how contact point moves as a function of inner cylinder rotation'
+    rolling_multiplier = d_pin / (2. * (d_hole - d_pin))
+
+    return np.degrees(np.arctan(friction) / (1. - 1. / (rolling_multiplier * sliding_factor)))
+
+
+def insulator_to_cantilever_beam_length(angle, h, h_min, EI, force, power_factor):
+    '''
+    Function to convert an insulator (soft cantilever beam) loaded in both transversal (x) and longitudinal (y)
+    directions to an equivalent beam only loaded in the x direction.
+
+    :param float angle: Friction factor
+    :param float h: Length of insulator assembly
+    :param float h_min: Minimum length of insulator assembly, usually length of clevis and swivel + some distance
+    :param float EI: Bending stiffness, typically taken based on insulator stem diameter
+    :param float force: Applied tensile load in insulator (resultant).
+    :param float power_factor: Factor describing moment evolution along effective cantilever beam
+    (length swivel -> effective rotation centre). 1 = linear, 2=square root function, 1.5=good fit with test results
+
+    :return: Length of equivalent cantilever beam.
+    :rtype: float
+    '''
+
+    a_rad = np.abs(np.radians(angle))
+    h_eff = h / np.cos(a_rad) * (1. - 1. / (3. * (EI / (force * h ** 2) + np.cos(a_rad) / (2. + 1. / power_factor))))
+
+    return h_eff if h_eff > h_min else h_min
+
+
+def bending_stiffness_cylinder(e_modulus, d):
+    '''
+    
+    
+    :param float e_modulus: Elastic modulus 
+    :param float d: Outer diameter of cylinder
+    
+    :return: Bending stiffness, EI
+    :rtype: float
+    '''
+
+    return e_modulus * np.pi / 64. * d ** 4
