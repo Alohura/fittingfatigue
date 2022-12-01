@@ -40,7 +40,25 @@ def dataframe_filter_only_columns_without_nas(df):
     return df.loc[:, ~df.isna().all()]
 
 
-def friction_torsion_resistance_swivel_t1(friction, force, r_out, r_in):
+def friction_torsion_resistance_swivel_rolling(angle, angle_max, force, r_pin):
+    '''
+    Function returning friction resistance moment due to rolling resistance at swivel / pin interface.
+
+    :param float angle: Angle distance to swivel / pin contact point
+    :param float force: Transversal force component at insulator attachment point
+    :param float angle_max: Max angle distance to swivel / pin contact point, i.e. angle above which sliding occurs
+    :param float r_pin: Radius of swivel pin
+
+    :return: Swivel reaction moment due to reaction pin / swivel rotation resistance
+    :rtype: float
+    '''
+
+    angles = [abs(np.radians(angle)), abs(np.radians(angle_max))]
+
+    return abs(force) * min(angles) * r_pin
+
+
+def friction_torsion_resistance_swivel_t1(friction, force, r_out, r_in, lift_off=False):
     '''
     Function returning friction resistance moment due to reaction force at swivel / cleat interface.
 
@@ -48,15 +66,43 @@ def friction_torsion_resistance_swivel_t1(friction, force, r_out, r_in):
     :param float force: Transversal force component at insulator attachment point
     :param float r_out: Outer radius of swivel area in contact with cleat
     :param float r_in: Inner radius of swivel area in contact with cleat
+    :param bool lift_off: If transverse force and swivel configuration leads to lift-off on one cleat side
 
     :return: Swivel force reaction moment due to reaction force at swivel / cleat interface
     :rtype: float
     '''
 
-    return 2. * friction * abs(force) * (r_out ** 3 - r_in ** 3) / (r_out ** 2 - r_in ** 2) / 3.
+    t_friction = 2. * friction * abs(force) * (r_out ** 3 - r_in ** 3) / (r_out ** 2 - r_in ** 2) / 3.
+    if lift_off:
+        t_friction = friction * abs(force) * r_out - t_friction
+
+    return t_friction
 
 
-def friction_torsion_resistance_swivel_t2(friction, f_y, f_z, b_swivel, h_swivel, r_pin):
+def friction_torsion_resistance_swivel_t2(friction, f_y, f_z, b_swivel, h_swivel, r_out, r_in):
+    '''
+    Function returning friction resistance moment due to force couple in set up in swivel in case of transversal force
+    components. The force couple is assumed to act such that the effective T1 moment arm is "r_out".
+    Returns value non-zero value only if reaction force couple is of opposing sign.
+
+    :param float friction: Friction coefficient
+    :param float f_y: Transversal force component at insulator attachment point
+    :param float f_z: Vertical force component at insulator attachment point
+    :param float b_swivel: Width of swivel
+    :param float h_swivel: Height of swivel, from pin bolt centre line to cold end attachment centre point
+    :param float r_in: Inner radius of swivel area in contact with cleat
+    :param float r_out: Outer radius of swivel area in contact with cleat
+
+    :return: Swivel force reaction moment due to reaction force couple
+    :rtype: float
+    '''
+
+    r_y = (f_z / 2. - abs(f_y) * h_swivel / b_swivel)
+
+    return friction_torsion_resistance_swivel_t1(friction, f_y, r_out, r_in, True) if r_y < 0. else 0.
+
+
+def friction_torsion_resistance_swivel_t2_old(friction, f_y, f_z, b_swivel, h_swivel, r_pin):
     '''
     Function returning friction resistance moment due to force couple in set up in swivel in case of transversal force
     components. Returns value non-zero value only if reaction force couple is of opposing sign.

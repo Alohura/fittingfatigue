@@ -133,28 +133,33 @@ new_lst = list_items_move(lst, org_lst)
 print(lst)
 print(new_lst)
 
-columns = [
-       'row', 'structure_number', 'lc', 'wc',
-       'lc_description', 'set_no', 'phase_no', 'joint', 'vertical',
-       'transversal', 'longitudinal', 'line_id', 'resultant', 't1', 't2',
-       't_friction', 'm_section', 'SCF_axial', 'SCF_bending', 'stress_axial',
-       'stress_bending', 'stress', 'stress_axial_range',
-       'stress_bending_range', 'stress_range', 'f_long_nom', 'f_trans_nom',
-       'f_vert_nom', 'swing_angle_trans', 'swing_angle_trans_orig',
-       'swing_angle_trans_range', 'swing_angle_long', 'swing_angle_long_orig',
-       'swing_angle_long_range', 'sn_curve', 'damage'
-]
-
-
-columns = list_items_move(
-       columns,
-       [
-              ["line_id", "structure_number", False],
-              ["set_no", "lc", False],
-              ["resultant", "phase_no", True],
-              ["joint", "resultant", False],
-       ]
-)
+# columns = [
+#        'row', 'structure_number', 'lc', 'wc',
+#        'lc_description', 'set_no', 'phase_no', 'joint', 'vertical',
+#        'transversal', 'longitudinal', 'line_id', 'resultant', 't1', 't2',
+#        't_friction', 'm_section', 'SCF_axial', 'SCF_bending', 'stress_axial',
+#        'stress_bending', 'stress', 'stress_axial_range',
+#        'stress_bending_range', 'stress_range', 'f_long_nom', 'f_trans_nom',
+#        'f_vert_nom', 'swing_angle_trans', 'swing_angle_trans_orig',
+#        'swing_angle_trans_range', 'swing_angle_long', 'swing_angle_long_orig',
+#        'swing_angle_long_range', 'sn_curve', 'damage'
+# ]
+#
+#
+# columns = list_items_move(
+#        columns,
+#        [
+#               ["line_id", "structure_number", False],
+#               ["set_no", "lc", False],
+#               ["resultant", "phase_no", True],
+#               ["joint", "resultant", False],
+#        ]
+# )
 # print(columns)
 
-print(scf_roark_17b(40.2,20.35,1))
+# print(scf_roark_17b(40.2,20.35,1))
+
+my_str = "ben_hay_a_1"
+str1 = "a"
+str2 = "1"
+print(str1.isnumeric(), str2.isnumeric(), my_str[-1].isnumeric(), my_str[:-2], my_str[-2])

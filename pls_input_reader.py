@@ -13,7 +13,7 @@ time1 = time()
 def main():
     path_input = r"C:\Users\AndreasLem\Groundline\NZ-6529 - Ball clevis test and analysis support - Documents\03 Operations\Analysis"
     path_inputs = {
-        "ca": "Asset input",
+        "ca": "Asset input - 1.12.22",
         "loads": "Load input"
     }
     input_file = "ClevisFatigue_Input.xlsx"
@@ -99,8 +99,9 @@ class TowerColdEndFittingFatigue:
             "Stress range [MPa] (Axial + 2 x Bending stress ranges)": "stress_range",
             "Stress range - axial [MPa]": "stress_axial_range",
             "Stress range - bending [MPa]": "stress_bending_range",
-            "Friction resistance moment - T1 [Nm]": "t1",
+            "Friction rolling resistance moment - T1 [Nm]": "t1",
             "Friction resistance moment - T2 [Nm]": "t2",
+            "Friction resistance moment - T3 [Nm]": "t3",
             "Total friction resistance moment [Nm]": "t_friction",
             "Moment at critical stem section [Nm]": "m_section",
             "Moment fraction at stem section [-]:": "m_fraction",
@@ -522,15 +523,6 @@ class TowerColdEndFittingFatigue:
             'Preprocess dataframe for moment and stress calculations'
             df, df_nominal = self._dataframe_preprocess(file_name, df)
 
-            # 'Calculate moments'
-            # df, df_nominal = self._add_swivel_torsion_moments(df)
-            #
-            # 'Calculate stem stresses'
-            # df = self._add_stem_stresses(df)
-            #
-            # 'Convert to stress ranges'
-            # df = self._maximum_force_and_stress_range(df, df_nom_dict)
-
             df_list[i] = df
             df_nom_list[i] = df_nominal
             i += 1
@@ -560,7 +552,8 @@ class TowerColdEndFittingFatigue:
 
         'Add line ID to uniquely identify each line'
         file_to_line_id = {y: x for x, y in self.line_file_name_info["file_name"].items()}
-        df["line_id"] = file_to_line_id[file_name]
+        line_id = file_to_line_id[file_name]
+        df["line_id"] = line_id
 
         'Add set information, unique to tower and line'
         df["line_tow_set"] = df.loc[:, "line_id"] + "_" + df.loc[:, "structure_number"] + "_" \
@@ -759,17 +752,32 @@ class TowerColdEndFittingFatigue:
 
         'Calculate friction moments from swivel / cleat interface (T1) and from swivel / pin reaction force couple (T2)'
         df["t1"] = df.apply(
-            lambda x: friction_torsion_resistance_swivel_t1(my, x["transversal"], x["r_out"], x["r_in"]),
-            axis=1
-        )
-        df["t2"] = df.apply(
-            lambda x: friction_torsion_resistance_swivel_t2(
-                my, x["transversal"], x["vertical"], x["width"], x["height_swivel"], x["r_pin"]
+            lambda x: friction_torsion_resistance_swivel_rolling(
+                x["rolling_angle_swivel"],
+                x["rolling_angle_swivel_max"],
+                x["transversal"],
+                x["r_pin"]
             ),
             axis=1
         )
+        df["t2"] = df.apply(
+            lambda x: friction_torsion_resistance_swivel_t1(my, x["transversal"], x["r_out"], x["r_in"]),
+            axis=1
+        )
+        df["t3"] = df.apply(
+            lambda x: friction_torsion_resistance_swivel_t2(
+                my, x["transversal"], x["vertical"], x["width"], x["height_swivel"], x["r_out"], x["r_in"]
+            ),
+            axis=1
+        )
+        # df["t2"] = df.apply(
+        #     lambda x: friction_torsion_resistance_swivel_t2_old(
+        #         my, x["transversal"], x["vertical"], x["width"], x["height_swivel"], x["r_pin"]
+        #     ),
+        #     axis=1
+        # )
 
-        df["t_friction"] = df.loc[:, "t1"] + df.loc[:, "t2"]
+        df["t_friction"] = df.loc[:, "t1"] + df.loc[:, "t2"] + df.loc[:, "t3"]
         df["m_section"] = df.apply(
             lambda x: friction_moment_at_critical_section_swivel(
                 x["longitudinal"],
@@ -851,11 +859,6 @@ class TowerColdEndFittingFatigue:
         )
 
         'Force arm'
-        # df["force_arm"] = df.apply(
-        #     lambda x: force_arm if force_arm > (x["height_total"] + default_dist)
-        #     else (x["height_total"] + default_dist),
-        #     axis=1
-        # )
         'Bending stiffness of insulator, assume ball clevis stem is representative for insulator'
         EI = bending_stiffness_cylinder(
             self.general_info["e_modulus"], self.clevis_info["d_stem"]
@@ -913,18 +916,13 @@ class TowerColdEndFittingFatigue:
 
         return return_names
 
-    def _write_to_excel(self, df, group_col, sort_cols=[]):
-        '''
-        Write results to Excel.
-
-        :param pd.DataFrame df: Dataframe containing all information to be written to file
-        :param str group_col: Dataframe columns to group into separate sheets
-        :param list sort_cols: Columns to sort on, in prioritized order.
-
+    @staticmethod
+    def _write_to_excel_df_edit(df):
         '''
 
-        print(f"----------Time to start of Excel results write: {time() - time0}----------")
-        file_name = os.path.join(self.path_input, self.results_file_name)
+        :param df:
+        :return:
+        '''
         'Reorganize order of columns'
         columns = list_items_move(
             list(df.columns),
@@ -961,6 +959,30 @@ class TowerColdEndFittingFatigue:
                 "row"
             ]
         )
+        'PLS-CADD sometimes requires all towers to be stored in different models. These are typically named ".._1", '
+        '".._2" etc. Below such models are merged to one'
+        df.loc[:, "line_id"] = df.loc[:, "line_id"].map(
+            lambda x: x[:-2] if (x[-1].isnumeric() and x[-2] == "_") else x
+        )
+
+        'Change force arm distance to mm'
+        df.loc[:, "force_arm"] = df.loc[:, "force_arm"] * 1000.
+
+        return df
+
+    def _write_to_excel(self, df, group_col, sort_cols=[]):
+        '''
+        Write results to Excel.
+
+        :param pd.DataFrame df: Dataframe containing all information to be written to file
+        :param str group_col: Dataframe columns to group into separate sheets
+        :param list sort_cols: Columns to sort on, in prioritized order.
+
+        '''
+
+        print(f"----------Time to start of Excel results write: {time() - time0}----------")
+        file_name = os.path.join(self.path_input, self.results_file_name)
+        df = self._write_to_excel_df_edit(df)
 
         with pd.ExcelWriter(file_name) as writer:
             'Store summary sheet'
