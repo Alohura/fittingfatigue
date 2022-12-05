@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from scipy import optimize
 from collections import OrderedDict
+from copy import copy
 
 
 def split_word_to_list(input_string):
@@ -861,14 +862,15 @@ def swivel_rotation_angle_max(friction, d_pin, d_hole, sliding_factor):
     return np.degrees(np.arctan(friction) / (1. - 1. / (rolling_multiplier * sliding_factor)))
 
 
-def insulator_to_cantilever_beam_length(angle, h, h_min, EI, force, power_factor):
+def insulator_to_cantilever_beam_length(t_friction, angle, h, h_min, EI, force, power_factor):
     '''
     Function to convert an insulator (soft cantilever beam) loaded in both transversal (x) and longitudinal (y)
     directions to an equivalent beam only loaded in the x direction.
 
+    :param float t_friction: Torsion resistance moment
     :param float angle: Friction factor
     :param float h: Length of insulator assembly
-    :param float h_min: Minimum length of insulator assembly, usually length of clevis and swivel + some distance
+    :param float h_min: Minimum length of insulator assembly outside svivel + clevis length, usually roughly 100 mm.
     :param float EI: Bending stiffness, typically taken based on insulator stem diameter
     :param float force: Applied tensile load in insulator (resultant).
     :param float power_factor: Factor describing moment evolution along effective cantilever beam
@@ -879,9 +881,66 @@ def insulator_to_cantilever_beam_length(angle, h, h_min, EI, force, power_factor
     '''
 
     a_rad = np.abs(np.radians(angle))
-    h_eff = h / np.cos(a_rad) * (1. - 1. / (3. * (EI / (force * h ** 2) + np.cos(a_rad) / (2. + 1. / power_factor))))
 
-    return h_eff if h_eff > h_min else h_min
+    angle_max = optimize.root_scalar(
+        force_arm_minimize_function,
+        x0=0.,
+        x1=np.radians(5.),
+        # bracket=[-np.radians(1.), np.radians(1.)],
+        args=(
+            t_friction, force, EI, h, power_factor
+        ),
+        maxiter=20,
+        method='secant'
+        # method='brentq'
+    )
+
+    if not angle_max.converged:
+        h_eff = h_min
+    else:
+        if angle_max.root < a_rad:
+            a_rad = angle_max.root
+        h_eff = h / np.cos(a_rad) * (1. - 1. / (3. * (EI / (force * h ** 2) + np.cos(a_rad) /
+                                                      (2. + 1. / power_factor))))
+
+    return max(h_eff, h_min)  # h_eff if h_eff > h_min else h_min
+
+
+def force_arm_minimize_function(angle, torsion, force, EI, h, power_factor):
+    '''
+    Function used to find the force angle which results in torsion moment "torsion".
+    The variable to miminize the expression is "angle". Once a value of zero is returned, force * angle = torsion
+
+    :param float torsion: Torsion moment to which force times displacement shall equal
+    :param float force: Applied resultant force
+    :param float angle: Angle of applied force [radians]
+    :param float EI: Bending stiffness of beam
+    :param float h: Height of beam
+    :param float power_factor: Power factor to define moment distribution from the longitudinal force component
+
+    :return: Function value that shall be minimized
+    :rtype: float
+    '''
+
+    return torsion - cantilever_beam_deformation(force, angle, EI, h, power_factor) * force
+
+
+def cantilever_beam_deformation(force, angle, EI, h, power_factor):
+    '''
+    Function to calculate deformation for cantilever beam with force applied at an angle, i.e. with two force
+    components.
+
+    :param float force: Applied resultant force
+    :param float angle: Angle of applied force [radians]
+    :param float EI: Bending stiffness of beam
+    :param float h: Height of beam
+    :param float power_factor: Power factor to define moment distribution from the longitudinal force component
+
+    :return: Beam deformation
+    :rtype: float
+    '''
+
+    return h * np.tan(angle) * (1. - 1. / (3. * (EI / (force * h ** 2) + abs(np.cos(angle)) / (2. + 1. / power_factor))))
 
 
 def bending_stiffness_cylinder(e_modulus, d):

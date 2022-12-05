@@ -64,6 +64,7 @@ class TowerColdEndFittingFatigue:
             'Stem diameter [mm]:': 'd_stem',
             'Transition radius [mm]:': 'r_notch',
             'Ball effective diameter [mm]:': 'd_ball',
+            'Effective insulator diameter [mm]:': 'd_insulator',
             'Ball clevis length [mm]:': 'l_clevis',
             'Rolling angle factor [-]:': 'rolling_factor',
             'Power factor [-]:': 'power_factor',
@@ -614,7 +615,8 @@ class TowerColdEndFittingFatigue:
             lambda x: df_nom_dict[x]["stress_axial"]))
         df["stress_bending_range"] = abs(df.loc[:, "stress_bending"] - df.loc[:, line_tow_set_column].map(
             lambda x: df_nom_dict[x]["stress_bending"]))
-        df["stress_range"] = df.loc[:, "stress_axial_range"] + 2. * df.loc[:, "stress_bending_range"]
+        # df["stress_range"] = df.loc[:, "stress_axial_range"] + 2. * df.loc[:, "stress_bending_range"]
+        df["stress_range"] = df.loc[:, "stress_axial_range"] + df.loc[:, "stress_bending_range"]
 
         'Find maximum LC per "line_tow_set"'
         df = df.sort_values("stress_range", ascending=False).drop_duplicates([line_tow_set_column])
@@ -778,6 +780,33 @@ class TowerColdEndFittingFatigue:
         # )
 
         df["t_friction"] = df.loc[:, "t1"] + df.loc[:, "t2"] + df.loc[:, "t3"]
+
+        'Force arm'
+        'Bending stiffness of insulator, assume ball clevis stem is representative for insulator'
+        EI = bending_stiffness_cylinder(
+            self.general_info["e_modulus"], self.clevis_info["d_insulator"]
+        ) * unit_conversion ** 2
+        df["force_arm"] = df.apply(
+            lambda x: insulator_to_cantilever_beam_length(
+                x["t_friction"],
+                x["swing_angle_long_range"],
+                self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["length_insulator"]
+                * unit_conversion * np.cos(np.radians(abs(x["swing_angle_trans"]))),  # Vertical length of insulator
+                # self.general_info["length_insulator"] * unit_conversion * np.cos(np.radians(x["swing_angle_trans"])),  # Vertical length of insulator
+                x["height_total"] + force_arm_min_dist,
+                EI,
+                np.sqrt(x["vertical"] ** 2 + x["longitudinal"] ** 2),  # Resultant in longitudinal / vertical plane
+                self.general_info["power_factor"]
+            ),
+            axis=1
+        )
+
+        'Calculate moment fraction at critical clevis intersection'
+        df["m_fraction"] = df.apply(
+            lambda x: 1. - x["height_total"] / x["force_arm"],
+            axis=1
+        )
+
         df["m_section"] = df.apply(
             lambda x: friction_moment_at_critical_section_swivel(
                 x["longitudinal"],
@@ -858,28 +887,30 @@ class TowerColdEndFittingFatigue:
             axis=1
         )
 
-        'Force arm'
-        'Bending stiffness of insulator, assume ball clevis stem is representative for insulator'
-        EI = bending_stiffness_cylinder(
-            self.general_info["e_modulus"], self.clevis_info["d_stem"]
-        ) * unit_conversion ** 2
-        df["force_arm"] = df.apply(
-            lambda x: insulator_to_cantilever_beam_length(
-                x["swing_angle_long_range"],
-                self.general_info["length_insulator"] * unit_conversion * np.cos(np.radians(x["swing_angle_trans"])),  # Vertical length of insulator
-                x["height_total"] + default_dist,
-                EI,
-                np.sqrt(x["vertical"] ** 2 + x["longitudinal"] ** 2),  # Resultant in longitudinal / vertical plane
-                self.general_info["power_factor"]
-            ),
-            axis=1
-        )
-
-        'Calculate moment fraction at critical clevis intersection'
-        df["m_fraction"] = df.apply(
-            lambda x: 1. - x["height_total"] / x["force_arm"],
-            axis=1
-        )
+        # 'Force arm'
+        # 'Bending stiffness of insulator, assume ball clevis stem is representative for insulator'
+        # EI = bending_stiffness_cylinder(
+        #     self.general_info["e_modulus"], self.clevis_info["d_stem"]
+        # ) * unit_conversion ** 2
+        # df["force_arm"] = df.apply(
+        #     lambda x: insulator_to_cantilever_beam_length(
+        #         x["swing_angle_long_range"],
+        #         self._swivel_hbk_set_lookup(x["set_name"], x["hbk"], dcts_default)["length_insulator"]
+        #         * unit_conversion * np.cos(np.radians(x["swing_angle_trans"])),  # Vertical length of insulator
+        #         # self.general_info["length_insulator"] * unit_conversion * np.cos(np.radians(x["swing_angle_trans"])),  # Vertical length of insulator
+        #         x["height_total"] + default_dist,
+        #         EI,
+        #         np.sqrt(x["vertical"] ** 2 + x["longitudinal"] ** 2),  # Resultant in longitudinal / vertical plane
+        #         self.general_info["power_factor"]
+        #     ),
+        #     axis=1
+        # )
+        #
+        # 'Calculate moment fraction at critical clevis intersection'
+        # df["m_fraction"] = df.apply(
+        #     lambda x: 1. - x["height_total"] / x["force_arm"],
+        #     axis=1
+        # )
 
         return df
 

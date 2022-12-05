@@ -163,3 +163,35 @@ my_str = "ben_hay_a_1"
 str1 = "a"
 str2 = "1"
 print(str1.isnumeric(), str2.isnumeric(), my_str[-1].isnumeric(), my_str[:-2], my_str[-2])
+
+# t_friction = 155.65  # 755.
+# angle = 1.339  # 56.97
+# h = 1.603  # .517
+# h_min = .0695  # .325
+# EI = 1768.
+# force = 13194.2  # 14783.
+# t_friction = 955.8
+# angle = 70.33
+# h = 2.5 * np.cos(np.radians(58.44))
+# h_min = .325
+# EI = 1768.
+# force = np.sqrt(16804 ** 2 + 24545. ** 2)
+# t_friction = 755.
+# angle = 56.97
+# h = .517
+# h_min = .325
+# EI = 1768.
+# force = 14783.
+t_friction = 550.
+angle = 41.45
+h = .773
+h_min = .325
+EI = 1768.
+force = 22050.
+
+power_factor = 1.5
+print(h)
+# 150.65619332516513 1.3389977248521419 1.6028339520576338 0.6950000000000001 1767.8558406503357 13194.220136105052 1.5
+h_eff = insulator_to_cantilever_beam_length(t_friction, angle, h, h_min, EI, force, power_factor)
+# delta = cantilever_beam_deformation(force, np.radians(angle), EI, h, power_factor)
+print(h_eff*1000)
