@@ -4,6 +4,7 @@ from scipy import optimize
 from collections import OrderedDict
 from copy import copy
 
+# Ryan's taking over
 
 def split_word_to_list(input_string):
     return [str_char for str_char in input_string]
