@@ -46,7 +46,7 @@ def friction_torsion_resistance_swivel_rolling(angle, angle_max, force, r_pin):
     Function returning friction resistance moment due to rolling resistance at swivel / pin interface.
 
     :param float angle: Angle distance to swivel / pin contact point
-    :param float force: Transversal force component at insulator attachment point
+    :param float force: Resultant force at insulator attachment point in the longitudinal - vertical plane
     :param float angle_max: Max angle distance to swivel / pin contact point, i.e. angle above which sliding occurs
     :param float r_pin: Radius of swivel pin
 
@@ -132,7 +132,7 @@ def friction_moment_at_critical_section_swivel(f_x, force_arm, fraction_to_criti
     :param float force_arm: Distance from swivel pin bolt centre line to effective force arm. Can be further out than
     clevis / ball contact, depending on friction in the insulator ball links
     :param float fraction_to_critical_section: Distance (pin -> critical section) / (effective force arm)
-    :param float friction_moment: Friction resistance moment (T1 + T2)
+    :param float friction_moment: Friction resistance moment (T1 + T2 + T3)
 
     :return: Moment at critical section
     :rtype: float
@@ -886,13 +886,11 @@ def insulator_to_cantilever_beam_length(t_friction, angle, h, h_min, EI, force, 
         force_arm_minimize_function,
         x0=0.,
         x1=np.radians(5.),
-        # bracket=[-np.radians(1.), np.radians(1.)],
         args=(
             t_friction, force, EI, h, power_factor
         ),
         maxiter=20,
-        method='secant'
-        # method='brentq'
+        method='secant'  # method='brentq'
     )
 
     if not angle_max.converged:
@@ -955,3 +953,27 @@ def bending_stiffness_cylinder(e_modulus, d):
     '''
 
     return e_modulus * np.pi / 64. * d ** 4
+
+
+def notch_factor_neuber_beta(ys):
+    """
+    Beta factor for use in Neuber notch factor for steels, taken from N. E. Dowling 'Mechanical Behaviour of
+    Materials', Third Edition, formula 10.11 in section 10.3
+
+    :param float ys: Yield strength, in MPa
+    :return: Beta factor, to be used with notch radius in calculating notch sensitivity factor, in mm.
+    """
+    return 10. ** (-1.079 * ys ** 3 * 1.e-9 + 2.74 * ys ** 2 * 1.e-6 - 3.74 * ys * 1.e-3 + 0.6404)
+
+
+def notch_factor_neuber_q(r, beta):
+    """
+    Notch sensitivity factor, q, for use in Neuber notch factor for steels, taken from N. E. Dowling
+    'Mechanical Behaviour of Materials', Third Edition, formula 10.10 in section 10.3
+
+    :param float r: Notch radius, in mm
+    :param float beta: Material sensitive factor
+    :return: Notch sensitivity factor, q
+    """
+
+    return 1. / (1. + np.sqrt(beta / r))

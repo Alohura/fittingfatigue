@@ -13,12 +13,13 @@ time1 = time()
 def main():
     path_input = r"C:\Users\AndreasLem\Groundline\NZ-6529 - Ball clevis test and analysis support - Documents\03 Operations\Analysis"
     path_inputs = {
-        "ca": "Asset input - 1.12.22",
-        "loads": "Load input"
+        "ca": "Asset input - test",
+        "loads": "Load input - test",
+        # "loads": "Load input",
     }
     input_file = "ClevisFatigue_Input.xlsx"
     results_file = "line_summary.xlsx"
-    TowerColdEndFittingFatigue.fatigue_damage(path_input, path_inputs, input_file, results_file, True, False)
+    TowerColdEndFittingFatigue.fatigue_damage(path_input, path_inputs, input_file, results_file, True, True)
 
 
 class TowerColdEndFittingFatigue:
@@ -166,6 +167,8 @@ class TowerColdEndFittingFatigue:
         'Setup for Excel and csv input'
         self.excel_object = self._init_excel_object()
         self.csv_objects = self._init_csv_files()
+        'Manual notch reduction factor calculation'
+        self.notch_beta = notch_factor_neuber_beta(800.)
 
     @classmethod
     def fatigue_damage(cls, path_setup, path_inputs, input_file, results_file, read_pickle_ca=False, read_pickle=False):
@@ -615,8 +618,8 @@ class TowerColdEndFittingFatigue:
             lambda x: df_nom_dict[x]["stress_axial"]))
         df["stress_bending_range"] = abs(df.loc[:, "stress_bending"] - df.loc[:, line_tow_set_column].map(
             lambda x: df_nom_dict[x]["stress_bending"]))
-        # df["stress_range"] = df.loc[:, "stress_axial_range"] + 2. * df.loc[:, "stress_bending_range"]
-        df["stress_range"] = df.loc[:, "stress_axial_range"] + df.loc[:, "stress_bending_range"]
+        df["stress_range"] = df.loc[:, "stress_axial_range"] + 2. * df.loc[:, "stress_bending_range"]
+        # df["stress_range"] = df.loc[:, "stress_axial_range"] + df.loc[:, "stress_bending_range"]
 
         'Find maximum LC per "line_tow_set"'
         df = df.sort_values("stress_range", ascending=False).drop_duplicates([line_tow_set_column])
@@ -637,8 +640,12 @@ class TowerColdEndFittingFatigue:
         d_ball = self.clevis_info["d_ball"] * self.unit_conversion[self.general_info["unit"]]
         # df["SCF_axial"] = df.apply(lambda x: scf_roark_17a(x["r_out"] * 2., x["r_in"] * 2., r_notch), axis=1)
         # df["SCF_bending"] = df.apply(lambda x: scf_roark_17b(x["r_out"] * 2., x["r_in"] * 2., r_notch), axis=1)
-        df["SCF_axial"] = scf_roark_17a(d_ball, d_stem, r_notch)
-        df["SCF_bending"] = scf_roark_17b(d_ball, d_stem, r_notch)
+        # df["SCF_axial"] = scf_roark_17a(d_ball, d_stem, r_notch)
+        # df["SCF_bending"] = scf_roark_17b(d_ball, d_stem, r_notch)
+        df["SCF_axial"] = 1. + notch_factor_neuber_q(r_notch * 1000., self.notch_beta) * \
+                          (scf_roark_17a(d_ball, d_stem, r_notch) - 1.)
+        df["SCF_bending"] = 1. + notch_factor_neuber_q(r_notch * 1000., self.notch_beta) * \
+                            (scf_roark_17b(d_ball, d_stem, r_notch) - 1.)
         df["stress_axial"] = df.apply(
             lambda x: stress_stem_roark_17(
                 x["resultant"], 0., x["SCF_axial"], 0., d_ball, d_stem
@@ -757,7 +764,7 @@ class TowerColdEndFittingFatigue:
             lambda x: friction_torsion_resistance_swivel_rolling(
                 x["rolling_angle_swivel"],
                 x["rolling_angle_swivel_max"],
-                x["transversal"],
+                np.sqrt(x["longitudinal"] ** 2 + x["vertical"] ** 2),
                 x["r_pin"]
             ),
             axis=1
@@ -782,7 +789,7 @@ class TowerColdEndFittingFatigue:
         df["t_friction"] = df.loc[:, "t1"] + df.loc[:, "t2"] + df.loc[:, "t3"]
 
         'Force arm'
-        'Bending stiffness of insulator, assume ball clevis stem is representative for insulator'
+        'Bending stiffness of insulator'
         EI = bending_stiffness_cylinder(
             self.general_info["e_modulus"], self.clevis_info["d_insulator"]
         ) * unit_conversion ** 2
@@ -800,6 +807,7 @@ class TowerColdEndFittingFatigue:
             ),
             axis=1
         )
+        # df["force_arm"] = df.loc[:, "height_total"]
 
         'Calculate moment fraction at critical clevis intersection'
         df["m_fraction"] = df.apply(
